@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+  <title>NHL 2026-27</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="img/tab-icon.svg" alt="">
+    <h1>NHL 2026-27</h1>
+    <span id="where" class="chip"></span>
+    <span id="version" class="chip version"></span>
+    <button id="btn-theme" class="icon-btn" type="button" hidden>Theme</button>
+  </header>
+
+  <!-- Shared navigation bar: same order, look and keys in every dash (docs/NAVBAR-SPEC.md). -->
+  <div class="navpill-row">
+    <div id="navpill" class="navpill" role="navigation" aria-label="Page navigation">
+      <button id="btn-back" class="np-btn" type="button" title="Back (Alt+Left)" aria-label="Back"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button id="btn-fwd" class="np-btn" type="button" title="Forward (Alt+Right)" aria-label="Forward"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <a id="btn-home" class="np-btn" href="#/" title="Home" aria-label="Home" data-route="home"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <button id="btn-refresh" class="np-btn" type="button" title="Refresh (F5)" aria-label="Refresh"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <span class="np-sep" aria-hidden="true"></span>
+      <div class="psearch">
+        <input id="psearch" type="search" placeholder="Search cards..." autocomplete="off" spellcheck="false" aria-label="Search cards">
+        <div id="psearch-results" class="psearch-results" hidden></div>
+      </div>
+      <span class="np-sep" aria-hidden="true"></span>
+      <button id="live-status" class="live-status np-live" type="button" aria-pressed="false"></button>
+      <button id="btn-settings" class="np-btn" type="button" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM19.4 13.5l1.6 1.2-1.8 3.1-1.9-.7a7.6 7.6 0 0 1-1.7 1l-.3 2h-3.6l-.3-2a7.6 7.6 0 0 1-1.7-1l-1.9.7-1.8-3.1 1.6-1.2a7.7 7.7 0 0 1 0-2l-1.6-1.2 1.8-3.1 1.9.7a7.6 7.6 0 0 1 1.7-1l.3-2h3.6l.3 2a7.6 7.6 0 0 1 1.7 1l1.9-.7 1.8 3.1-1.6 1.2a7.7 7.7 0 0 1 0 2z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+  </div>
+
+  <div id="halted" class="halted" hidden role="status">
+    <span><strong>Data traffic stopped.</strong> Nothing runs here until you resume.</span>
+    <button id="btn-resume" class="btn primary" type="button">Resume</button>
+  </div>
+
+  <main id="view-home" class="grid">
+    <section class="card">
+      <h2>Worker</h2>
+      <p class="big" id="ticks">0</p>
+      <p class="muted">Counts once a second while this tab is visible. Switch to another tab and it pauses; come back and it carries on.</p>
+      <p class="muted small" id="traffic"></p>
+    </section>
+
+    <section class="card">
+      <h2>Tab badges</h2>
+      <p class="muted">Each switch lights up a badge on this tab in the launcher's rail, within 2 seconds.</p>
+      <div class="row">
+        <span>Pretend live games</span>
+        <span class="stepper"><button class="btn sq" type="button" data-live="-1" aria-label="Fewer">&minus;</button><b id="live">0</b><button class="btn sq" type="button" data-live="1" aria-label="More">+</button></span>
+      </div>
+      <label class="row"><span>Pretend an update is available</span><input id="t-update" type="checkbox"></label>
+      <label class="row"><span>Pretend there is a problem</span><input id="t-problem" type="checkbox"></label>
+    </section>
+
+    <section class="card">
+      <h2>Fake sync</h2>
+      <p class="muted">Runs for 8 seconds and keeps going if you switch tabs. The launcher's stop button cancels it.</p>
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+      <div class="actions">
+        <button id="btn-sync" class="btn primary" type="button">Run a fake sync</button>
+        <button id="btn-cancel" class="btn" type="button" hidden>Cancel</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Messages from the host</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </main>
+
+  <main id="view-settings" class="grid" hidden>
+    <section class="card">
+      <h2>Settings</h2>
+      <p class="muted">A real dash puts its settings here: automatic refresh (opt-in, with a warning), intervals, favourites. The NHL dash has none.</p>
+      <p><a href="#/">Back to home</a></p>
+    </section>
+  </main>
+
+  <p class="foot muted small">Nothing here contacts the internet: every number is made up. Copy this folder to start a new dashboard.</p>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

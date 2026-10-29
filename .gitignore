@@ -1,0 +1,14 @@
+# WebView2 wrapper DLLs are downloaded on first run
+lib/
+update/
+*.zip
+*.sha256
+*.log
+*.tmp
+# test screenshots and scratch files
+*.png
+!ui/img/*.png
+scratch/
+.vscode/
+.DS_Store
+Thumbs.db

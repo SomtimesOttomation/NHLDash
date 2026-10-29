@@ -1,0 +1,5 @@
+# Files left out of the release zip (git archive)
+.gitignore export-ignore
+.gitattributes export-ignore
+lib export-ignore
+update export-ignore

@@ -1,0 +1,13 @@
+{
+  "contract": 1,
+  "id": "nhldash",
+  "name": "NHL",
+  "title": "NHL 2026-27",
+  "versionFile": "VERSION",
+  "icon": "ui/img/tab-icon.svg",
+  "backend": "modules/NHLDash.Host.psm1",
+  "ui": "ui",
+  "entry": "index.html",
+  "standalone": "Start-NHLDash.bat",
+  "dataSources": []
+}
