@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+        content="default-src 'self'; img-src 'self' data: https://nhldash.cache; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
   <title>NHL 2026-27</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -12,7 +12,12 @@
   <header class="top">
     <img class="logo" src="img/tab-icon.svg" alt="">
     <h1>NHL 2026-27</h1>
-    <span id="where" class="chip"></span>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#/" data-tab="scores">Scores</a>
+      <a href="#/standings" data-tab="standings">Standings</a>
+      <a href="#/leaders" data-tab="leaders">Leaders</a>
+      <a href="#/advanced" data-tab="advanced">Advanced</a>
+    </nav>
     <span id="version" class="chip version"></span>
     <button id="btn-theme" class="icon-btn" type="button" hidden>Theme</button>
   </header>
@@ -26,7 +31,7 @@
       <button id="btn-refresh" class="np-btn" type="button" title="Refresh (F5)" aria-label="Refresh"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <span class="np-sep" aria-hidden="true"></span>
       <div class="psearch">
-        <input id="psearch" type="search" placeholder="Search cards..." autocomplete="off" spellcheck="false" aria-label="Search cards">
+        <input id="psearch" type="search" placeholder="Search teams and players..." autocomplete="off" spellcheck="false" aria-label="Search teams and players">
         <div id="psearch-results" class="psearch-results" hidden></div>
       </div>
       <span class="np-sep" aria-hidden="true"></span>
@@ -36,54 +41,21 @@
   </div>
 
   <div id="halted" class="halted" hidden role="status">
-    <span><strong>Data traffic stopped.</strong> Nothing runs here until you resume.</span>
+    <span><strong>Data traffic stopped.</strong> Nothing is downloaded until you resume. Saved data still shows.</span>
     <button id="btn-resume" class="btn primary" type="button">Resume</button>
   </div>
 
-  <main id="view-home" class="grid">
-    <section class="card">
-      <h2>Worker</h2>
-      <p class="big" id="ticks">0</p>
-      <p class="muted">Counts once a second while this tab is visible. Switch to another tab and it pauses; come back and it carries on.</p>
-      <p class="muted small" id="traffic"></p>
-    </section>
+  <main id="view"></main>
 
-    <section class="card">
-      <h2>Tab badges</h2>
-      <p class="muted">Each switch lights up a badge on this tab in the launcher's rail, within 2 seconds.</p>
-      <div class="row">
-        <span>Pretend live games</span>
-        <span class="stepper"><button class="btn sq" type="button" data-live="-1" aria-label="Fewer">&minus;</button><b id="live">0</b><button class="btn sq" type="button" data-live="1" aria-label="More">+</button></span>
-      </div>
-      <label class="row"><span>Pretend an update is available</span><input id="t-update" type="checkbox"></label>
-      <label class="row"><span>Pretend there is a problem</span><input id="t-problem" type="checkbox"></label>
-    </section>
+  <div id="dialog" class="dialog" hidden role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+    <div class="dialog-box">
+      <h2 id="dialog-title"></h2>
+      <div id="dialog-body"></div>
+      <div class="actions"><button id="dialog-ok" class="btn primary" type="button">I understand, turn it on</button><button id="dialog-cancel" class="btn" type="button">Cancel</button></div>
+    </div>
+  </div>
 
-    <section class="card">
-      <h2>Fake sync</h2>
-      <p class="muted">Runs for 8 seconds and keeps going if you switch tabs. The launcher's stop button cancels it.</p>
-      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
-      <div class="actions">
-        <button id="btn-sync" class="btn primary" type="button">Run a fake sync</button>
-        <button id="btn-cancel" class="btn" type="button" hidden>Cancel</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Messages from the host</h2>
-      <ol id="log" class="log"></ol>
-    </section>
-  </main>
-
-  <main id="view-settings" class="grid" hidden>
-    <section class="card">
-      <h2>Settings</h2>
-      <p class="muted">A real dash puts its settings here: automatic refresh (opt-in, with a warning), intervals, favourites. The NHL dash has none.</p>
-      <p><a href="#/">Back to home</a></p>
-    </section>
-  </main>
-
-  <p class="foot muted small">Nothing here contacts the internet: every number is made up. Copy this folder to start a new dashboard.</p>
+  <p class="foot muted small">Unofficial. Not affiliated with the NHL or any data provider. Data is fetched on this computer when you ask for it.</p>
   <script type="module" src="app.js"></script>
 </body>
 </html>
