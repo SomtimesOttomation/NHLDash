@@ -6,6 +6,11 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+**Feature**
+- NHL data from the NHL web API: scores by date, live game status, scoring summary, shot map, box scores, standings and leaders.
+- Optional MoneyPuck advanced stats (xG, shot quality, goalie GSAx), off by default, behind a warning.
+- Opt-in automatic refresh (20-600 s, visible tab only), favourite team, team and player search.
+
 **Housekeeping**
 - Started from DashLauncher's Sample dash (contract 1, shared navigation bar, pause switch).
 
