@@ -6,6 +6,8 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.2.0 (2026-10-29)
+
 **Feature**
 - NHL data from the NHL web API: scores by date, live game status, scoring summary, shot map, box scores, standings and leaders.
 - Optional MoneyPuck advanced stats (xG, shot quality, goalie GSAx), off by default, behind a warning.
