@@ -250,3 +250,18 @@ input[type=number] { width: 80px; }
 a.tlink { color: inherit; text-decoration: none; }
 a.tlink:hover { text-decoration: underline; }
 .favchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: var(--surface2); color: var(--text); text-decoration: none; margin: 2px; }
+
+/* Version button and update window (same as NBADash) */
+.ver-btn { margin-left: auto; font-size: 12px; color: var(--muted); padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent; position: relative; }
+.ver-btn:hover { background: var(--surface2); color: var(--text); }
+.ver-btn.has-update { color: var(--text); border-color: var(--accent2); }
+.ver-btn.has-update::after { content: ""; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent2); }
+.upd { min-width: 380px; }
+.upd-notes { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface2); max-height: 260px; overflow: auto; font-size: 13px; line-height: 1.5; }
+.upd-h { font-weight: 700; margin-top: 6px; }
+.upd-li { padding-left: 14px; position: relative; }
+.upd-li::before { content: "\2022"; position: absolute; left: 3px; }
+.upd-err { color: var(--warn); }
+.actions.end { justify-content: flex-end; }
+.pbar { height: 8px; border-radius: 999px; background: var(--surface2); overflow: hidden; margin-top: 8px; }
+.pbar i { display: block; height: 100%; background: var(--accent2); transition: width .25s; }

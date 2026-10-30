@@ -39,7 +39,7 @@ $script:LogoBase = 'https://assets.nhle.com/logos/nhl/svg/'
 $script:MoneyPuck = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/'
 
 function New-DefaultSettings {
-    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favorites = @() }
+    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favorites = @(); updateCheck = $true }
 }
 
 # ---------------------------------------------------------------- page messages
@@ -61,6 +61,7 @@ function Read-Settings {
         }
     } catch { }
     $s.autoRefresh = [bool]$s.autoRefresh; $s.autoAck = [bool]$s.autoAck
+    $s.updateCheck = [bool]$s.updateCheck
     $s.moneypuck = [bool]$s.moneypuck; $s.mpAck = [bool]$s.mpAck
     $s.refreshSeconds = Limit-Seconds $s.refreshSeconds
     $old = $null; try { if (Test-Path $script:SettingsFile) { $old = ([IO.File]::ReadAllText($script:SettingsFile) | ConvertFrom-Json).favTeam } } catch { }
@@ -286,6 +287,72 @@ function Reset-AutoTimer {
     } else { $script:NextAuto = [datetime]::MaxValue }
 }
 
+# ---------------------------------------------------------------- updater (child process, ported from NBADash)
+$script:UpdDir = ''
+$script:UpdProc = $null
+$script:UpdAction = ''
+$script:LastUpdJson = ''
+$script:UpdateAvailable = $null
+$script:UpdateNote = $null
+$script:UpdOut = ''
+$script:UpdEvents = $null
+
+function Get-ChildProgress {
+    # Reads a child's console output: the last ##PROGRESS marker.
+    param([string]$Path)
+    $r = @{ pct = 0; text = '' }
+    try {
+        $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        $sr = New-Object IO.StreamReader($fs)
+        while (($l = $sr.ReadLine()) -ne $null) {
+            if ($l.Trim() -match '^##PROGRESS (\d+)\|(.*)$') { $r.pct = [int]$Matches[1]; $r.text = $Matches[2] }
+        }
+        $sr.Close(); $fs.Close()
+    } catch { }
+    return $r
+}
+function Read-UpdateJson {
+    param([string]$Name)
+    $p = Join-Path $script:UpdDir $Name
+    if (Test-Path $p) { try { return ([IO.File]::ReadAllText($p) | ConvertFrom-Json) } catch { } }
+    return $null
+}
+function Start-Updater {
+    <# Update checks talk to GitHub only, so the pause switch leaves them alone. #>
+    param([string]$Action)
+    if ($script:UpdProc -and -not $script:UpdProc.HasExited) { return $false }
+    $cur = if ($env:NHLDASH_FAKE_VERSION) { $env:NHLDASH_FAKE_VERSION } else { $script:Version }     # test hook: pretend to be older
+    Remove-Item (Join-Path $script:UpdDir 'update-result.json') -Force -ErrorAction SilentlyContinue
+    $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $script:Root 'Update-NHLDash.ps1')),
+                  '-Action', $Action, '-CurrentVersion', $cur, '-WorkDir', ('"{0}"' -f $script:UpdDir))
+    if ($env:NHLDASH_UPDATE_API) { $argsList += '-ApiBase'; $argsList += $env:NHLDASH_UPDATE_API }   # test hook
+    $exe = if ($env:NHLDASH_PS) { $env:NHLDASH_PS } else { 'powershell.exe' }                         # test hook
+    $script:UpdAction = $Action
+    $sp = @{ FilePath = $exe; ArgumentList = $argsList; PassThru = $true; RedirectStandardOutput = $script:UpdOut }
+    if ($IsWindows -ne $false) { $sp.WindowStyle = 'Hidden' }       # $IsWindows is $null in Windows PowerShell 5.1
+    $script:UpdProc = Start-Process @sp
+    $script:LastUpdJson = ''
+    $script:Out.Enqueue((ConvertTo-PageJson @{ event = 'update'; data = @{ running = $true; action = $Action; pct = 0; text = 'Starting...' } }))
+    return $true
+}
+function Get-UpdateEvents {
+    $list = @()
+    if (-not $script:UpdProc) { return $list }
+    if ($script:UpdProc.HasExited) {
+        $res = Read-UpdateJson 'update-result.json'
+        if (-not $res) { $res = [pscustomobject]@{ status = 'error'; error = 'The update check ended without an answer.' } }
+        $script:UpdProc = $null
+        if ([string]$res.status -eq 'available' -or [string]$res.status -eq 'staged') { $script:UpdateAvailable = [string]$res.latest }
+        elseif ([string]$res.status -eq 'current') { $script:UpdateAvailable = $null }
+        $list += (ConvertTo-Json -InputObject @{ event = 'update'; data = @{ running = $false; action = $script:UpdAction; result = $res } } -Depth 6 -Compress)
+    } else {
+        $prog = Get-ChildProgress $script:UpdOut
+        $json = ConvertTo-PageJson @{ event = 'update'; data = @{ running = $true; action = $script:UpdAction; pct = $prog.pct; text = $prog.text } }
+        if ($json -ne $script:LastUpdJson) { $script:LastUpdJson = $json; $list += $json }
+    }
+    return $list
+}
+
 # ---------------------------------------------------------------- contract functions
 function Initialize-Dash {
     <# Takes the host lock, loads settings and makes folders. Fetches nothing. #>
@@ -309,6 +376,19 @@ function Initialize-Dash {
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
     }
     $script:SettingsFile = Join-Path $roam 'settings.json'
+    $script:UpdDir = Join-Path $local 'update'
+    if (-not (Test-Path $script:UpdDir)) { New-Item -ItemType Directory -Path $script:UpdDir -Force | Out-Null }
+    $script:UpdOut = Join-Path $script:UpdDir 'update.out'
+    # After an update the helper leaves a "pending" note: report the result once; the page load confirms it worked.
+    $script:UpdateNote = $null
+    $pend = Read-UpdateJson 'update-pending.json'
+    if ($pend -and [string]$pend.to -eq $script:Version) { $script:UpdateNote = @{ ok = $true; from = [string]$pend.from; to = [string]$pend.to } }
+    $failed = Read-UpdateJson 'update-failed.json'
+    if ($failed) {
+        $script:UpdateNote = @{ ok = $false; from = [string]$failed.from; to = [string]$failed.to; reason = [string]$failed.reason }
+        Remove-Item (Join-Path $script:UpdDir 'update-failed.json') -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+    }
     $script:Settings = Read-Settings
     $script:Shared = [hashtable]::Synchronized(@{
         Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null
@@ -343,7 +423,43 @@ function Invoke-DashCommand {
     $a = $Message.args
     try {
         switch ([string]$Message.cmd) {
-            'init' { Reply $id (ConvertTo-PageJson (Get-Snapshot)) }
+            'init' {
+                $snap = Get-Snapshot
+                $snap.updateNote = $script:UpdateNote
+                Reply $id (ConvertTo-PageJson $snap)
+                if ($script:UpdateNote -and $script:UpdateNote.ok) {
+                    # the page loaded: tell the update helper the new version works
+                    try { [IO.File]::WriteAllText((Join-Path $script:UpdDir 'update-ok.json'), '{"ok":true}') } catch { }
+                    Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+                }
+                $script:UpdateNote = $null
+            }
+            'update.check' { Reply $id ((Start-Updater 'Check').ToString().ToLower()) }
+            'update.stage' { Reply $id ((Start-Updater 'Stage').ToString().ToLower()) }
+            'update.cancel' {
+                try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
+                Reply $id 'true'
+            }
+            'update.apply' {
+                $st = Read-UpdateJson 'staged.json'
+                $stage = Join-Path $script:UpdDir 'stage'
+                if (-not $st -or -not (Test-Path (Join-Path $stage 'Start-NHLDash.ps1'))) { ReplyError $id 'There is no downloaded update to install. Download it again.'; return }
+                # run the helper from a copy so replacing the app files cannot touch the running helper
+                $runDir = Join-Path $script:UpdDir 'run'
+                if (-not (Test-Path $runDir)) { New-Item -ItemType Directory -Path $runDir -Force | Out-Null }
+                $helper = Join-Path $runDir 'Apply-Update.ps1'
+                Copy-Item (Join-Path $script:Root 'Apply-Update.ps1') $helper -Force
+                # Context.Relaunch is passed through exactly as given (it may include arguments, e.g. -Open nhldash)
+                $relaunch = if ($script:Ctx.Relaunch) { [string]$script:Ctx.Relaunch } else { '"' + (Join-Path $script:Root 'Start-NHLDash.bat') + '"' }
+                $relaunchB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($relaunch))
+                $hostPid = if ($script:Ctx.HostPid) { [int]$script:Ctx.HostPid } else { $PID }
+                $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $helper), '-AppDir', ('"{0}"' -f $script:Root), '-StageDir', ('"{0}"' -f $stage),
+                       '-WorkDir', ('"{0}"' -f $script:UpdDir), '-ParentPid', [string]$hostPid, '-RelaunchB64', $relaunchB64,
+                       '-OldVersion', $script:Version, '-NewVersion', [string]$st.version)
+                Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
+                Reply $id 'true'
+                if ($script:Ctx.Close) { & $script:Ctx.Close }
+            }
             'data.get' {
                 $spec = Resolve-DataKey ([string]$a.key)
                 if (-not $spec) { ReplyError $id 'unknown data key'; return }
@@ -379,6 +495,7 @@ function Invoke-DashCommand {
                         $s.moneypuck = $on; if ($on) { $s.mpAck = $true }
                     }
                     'favorites' { $s.favorites = Limit-Teams $a.value }
+                    'updateCheck' { $s.updateCheck = [bool]$a.value }
                     default { ReplyError $id 'unknown setting'; return }
                 }
                 Save-Settings
@@ -418,6 +535,7 @@ function Receive-DashEvents {
         Reset-AutoTimer
     }
     $out = New-Object System.Collections.Generic.List[string]
+    foreach ($u in @(Get-UpdateEvents)) { if ($u) { $out.Add($u) } }
     $msg = $null
     while ($out.Count -lt 25 -and $script:Out.TryDequeue([ref]$msg)) { $out.Add($msg) }
     return $out.ToArray()
@@ -436,7 +554,7 @@ function Get-DashStatus {
         Live            = $(if ($s.Halted) { 0 } else { [int]$s.Live })
         Syncing         = $syncing
         SyncPct         = $null
-        UpdateAvailable = $null
+        UpdateAvailable = $script:UpdateAvailable
         Error           = $(if ($s.Halted) { $null } else { $s.LastError })
         Traffic         = @{ Requests = [int]$s.Requests; Bytes = [long]$s.Bytes; Errors = [int]$s.Errors }
     }

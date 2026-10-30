@@ -390,6 +390,8 @@ views.settings = () => {
     <section class="card"><h2>MoneyPuck advanced stats</h2>
       <p class="muted">Expected goals, shot quality and goalie GSAx on the Advanced page. Downloads MoneyPuck's published season files when you open that page, at most every 12 hours.</p>
       <label class="row"><span>Use MoneyPuck</span><input id="set-mp" type="checkbox"${s.moneypuck ? ' checked' : ''}></label></section>
+    <section class="card"><h2>Updates</h2><p class="muted">Checks GitHub for a newer NHLDash release a few seconds after start. Click the version number to check any time. Not affected by the pause switch.</p>
+      <label class="row"><span>Check for updates on start</span><input id="set-upd" type="checkbox"${s.updateCheck !== false ? ' checked' : ''}></label></section>
     <section class="card"><h2>Data and sources</h2>
       <p class="small">NHL web API (api-web.nhle.com): scores, game centre, standings, leaders. Unofficial and undocumented; it can change without notice. <a href="https://www.nhl.com/info/terms-of-service" target="_blank" rel="noreferrer">NHL terms</a></p>
       <p class="small">MoneyPuck.com season files (only when turned on). <a href="https://moneypuck.com/data.htm" target="_blank" rel="noreferrer">MoneyPuck data terms</a></p>
@@ -411,6 +413,7 @@ async function setSetting(key, value, ack = false) {
 function alertNote(msg) { const n = document.createElement('div'); n.className = 'toast'; n.textContent = msg; document.body.append(n); setTimeout(() => n.remove(), 4000); }
 document.addEventListener('change', async (e) => {
   const id = e.target.id;
+  if (id === 'set-upd') setSetting('updateCheck', e.target.checked);
   if (id === 'set-secs') setSetting('refreshSeconds', Number(e.target.value));
   if (id === 'set-auto') {
     const on = e.target.checked;
@@ -538,6 +541,82 @@ views.team = (k) => {
   return head + schedule + mp + skaters;
 };
 
+// ------------------------------------------------------------------ updates (same window and steps as NBADash)
+const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
+const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
+const mbs = (n) => (n ? `${(n / 1048576).toFixed(1)} MB` : '');
+function versionChip() {
+  const b = $('btn-version');
+  b.textContent = state.version ? `v${state.version}` : '';
+  b.hidden = !state.version;
+  b.classList.toggle('has-update', upd.phase === 'available' || upd.phase === 'staged');
+  b.title = upd.phase === 'available' ? `Version ${upd.info?.latest} is available` : upd.phase === 'staged' ? 'Update downloaded: click to install' : 'Check for updates';
+}
+function notesHtml(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '<div class="muted">No release notes were published.</div>';
+  return lines.map((t) => {
+    const clean = esc(t.replace(/\*\*/g, ''));
+    if (/^#{1,6}\s/.test(t) || /^\*\*.+\*\*$/.test(t)) return `<div class="upd-h">${clean.replace(/^#{1,6}\s+/, '')}</div>`;
+    if (/^[-*]\s/.test(t)) return `<div class="upd-li">${clean.replace(/^[-*]\s+/, '')}</div>`;
+    return `<div>${clean}</div>`;
+  }).join('');
+}
+function paintUpdate() {
+  versionChip();
+  if ($('upd').hidden) return;
+  const i = upd.info || {};
+  const btn = (label, act, primary) => `<button class="btn${primary ? ' primary' : ''}" type="button" data-upd="${act}">${label}</button>`;
+  const bar = `<div class="pbar"><i style="width:${upd.pct || 3}%"></i></div><small class="muted">${esc(upd.text)}</small>`;
+  let body;
+  switch (upd.phase) {
+    case 'checking': body = bar + `<div class="actions end">${btn('Close', 'close')}</div>`; break;
+    case 'current': body = `<p><b>You're up to date (v${esc(i.latest)}).</b></p><div class="actions end">${btn('Check again', 'check')}${btn('Done', 'close', 1)}</div>`; break;
+    case 'ahead': body = `<p>This copy (v${esc(i.current)}) is newer than the latest published release (v${esc(i.latest)}).</p><div class="actions end">${btn('Done', 'close', 1)}</div>`; break;
+    case 'none': body = `<p>No release has been published yet.</p><p class="muted small">While the repository is private, GitHub does not show its releases here. Updates then come as drop-in zips through DashLauncher.</p><div class="actions end">${btn('Done', 'close', 1)}</div>`; break;
+    case 'available': body = `<p><b>Version ${esc(i.latest)} is available</b> <small class="muted">${[fmtDay(i.published), mbs(i.size)].filter(Boolean).join(' · ')}</small></p><div class="upd-notes">${notesHtml(i.notes)}</div>
+        ${i.installable === false ? '<p class="muted">This release has no update package attached yet, so it cannot be installed from here. Try again later.</p>' : ''}
+        <div class="actions end">${btn('Later', 'close')}${i.installable === false ? '' : btn('Download and install', 'stage', 1)}</div>`; break;
+    case 'downloading': body = `<p><b>Downloading version ${esc(i.latest || '')}</b></p>${bar}<div class="actions end">${btn('Cancel', 'cancel')}</div>`; break;
+    case 'staged': body = `<p><b>Version ${esc(i.latest)} is downloaded and verified.</b></p><p class="muted">The dashboard will close, swap in the new files and reopen. Your favourites, settings and saved data stay as they are. If the new version fails to start, the previous one is restored.</p><div class="actions end">${btn('Not now', 'close')}${btn('Restart now', 'apply', 1)}</div>`; break;
+    case 'error': body = `<p class="upd-err">${esc(upd.error)}</p><div class="actions end">${btn('Close', 'close')}${btn('Try again', 'check', 1)}</div>`; break;
+    default: body = `<div class="actions end">${btn('Check for updates', 'check', 1)}</div>`;
+  }
+  $('upd-box').innerHTML = `<h2>Updates</h2><p class="muted">You have v${esc(state.version || '?')}</p>${body}`;
+}
+async function checkUpdate(quiet = false) {
+  if (upd.phase === 'checking' || upd.phase === 'downloading') return;
+  upd.quiet = quiet; upd.phase = 'checking'; upd.error = ''; upd.pct = 0; upd.text = 'Asking GitHub for the latest release...'; paintUpdate();
+  try { if ((await bridge.request('update.check')) === false) { upd.phase = upd.info?.status === 'available' ? 'available' : 'idle'; paintUpdate(); } }
+  catch (e) { upd.phase = 'error'; upd.error = e.message; paintUpdate(); }
+}
+bridge.on('update', (d) => {
+  if (d.running) { upd.pct = d.pct || 0; upd.text = d.text || ''; if (d.action === 'Stage') upd.phase = 'downloading'; }
+  else {
+    const r = d.result || {};
+    upd.pct = 0; upd.text = '';
+    if (r.status === 'error') { upd.phase = upd.quiet ? 'idle' : 'error'; upd.error = r.error || 'The update did not finish.'; }
+    else { upd.phase = r.status || 'idle'; upd.info = r; }
+    if (upd.quiet && upd.phase === 'available') alertNote(`NHLDash ${r.latest} is available. Click the version number to update.`);
+  }
+  paintUpdate();
+});
+$('btn-version').addEventListener('click', () => {
+  upd.quiet = false;
+  $('upd').hidden = false;
+  if (!['checking', 'downloading', 'available', 'staged'].includes(upd.phase)) checkUpdate(); else paintUpdate();
+});
+$('upd').addEventListener('click', async (e) => {
+  if (e.target.id === 'upd') { $('upd').hidden = true; return; }
+  const a = e.target.closest('[data-upd]')?.dataset.upd;
+  if (!a) return;
+  if (a === 'close') $('upd').hidden = true;
+  if (a === 'check') checkUpdate();
+  if (a === 'stage') { upd.quiet = false; upd.phase = 'downloading'; upd.pct = 0; upd.text = 'Starting...'; paintUpdate(); try { await bridge.request('update.stage'); } catch (err) { upd.phase = 'error'; upd.error = err.message; paintUpdate(); } }
+  if (a === 'cancel') { try { await bridge.request('update.cancel'); } catch { } upd.phase = upd.info?.status === 'available' ? 'available' : 'idle'; paintUpdate(); }
+  if (a === 'apply') { try { await bridge.request('update.apply'); } catch (err) { upd.phase = 'error'; upd.error = err.message; paintUpdate(); } }
+});
+
 // ------------------------------------------------------------------ routing and render
 function parseRoute() {
   const h = location.hash || '#/';
@@ -558,7 +637,7 @@ function render() {
   const inLauncher = state.mode === 'launcher';
   $('btn-theme').hidden = inLauncher;
   $('halted').hidden = !state.halted;
-  $('version').textContent = state.version ? `v${state.version}` : '';
+  versionChip();
   $('btn-home').classList.toggle('active', !!r.home);
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === r.tab));
   const y = window.scrollY;
@@ -615,6 +694,7 @@ document.addEventListener('keydown', (e) => {
   if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); history.forward(); }
   if (e.key === 'F5') { e.preventDefault(); $('btn-refresh').click(); }
   if (e.key === 'Escape' && !$('dialog').hidden) $('dialog-cancel').click();
+  if (e.key === 'Escape' && !$('upd').hidden) $('upd').hidden = true;
 });
 window.addEventListener('mouseup', (e) => {
   if (e.button === 3) { e.preventDefault(); goBack(); }
@@ -687,6 +767,9 @@ bridge.on('host.visible', () => {
     if (state.mode !== 'launcher') { bridge.setTheme(standaloneTheme); $('btn-theme').textContent = `Theme: ${standaloneTheme}`; }
     else if (state.theme) bridge.setTheme(state.theme);
     render();
+    const note = state.updateNote;
+    if (note) alertNote(note.ok ? `Updated to NHLDash ${note.to}.` : `The update to ${note.to} did not start, so ${note.from} was restored. ${note.reason || ''}`);
+    if (state.settings.updateCheck !== false && !note) setTimeout(() => checkUpdate(true), 4000);
   } catch (e) {
     $('view').innerHTML = `<div class="note err">${esc(e.message)}</div>`;
   }
