@@ -6,6 +6,8 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.4.0 (2026-10-29)
+
 **Feature**
 - Updater: the version button opens the update window (check, download, verify, install, roll back), like NBADash.
 - Player pages: bio, this season, game log, NHL career; player names link to them everywhere.
