@@ -306,3 +306,14 @@ td.up { color: #16a34a; font-weight: 700; } td.down { color: var(--live); font-w
 .cmpbars i { display: block; height: 100%; background: var(--line); border-radius: 3px; }
 .cmpbars i:first-child { margin-left: auto; } .cmpbars i.win { background: var(--accent2); }
 .cmpbars { justify-content: center; }
+
+/* Moves */
+a.seg { text-decoration: none; color: var(--text); }
+a.seg.on { color: var(--on-accent2); }
+.filters { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.filters input[type=search] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 260px; }
+.txrow { display: flex; align-items: flex-start; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--line); }
+.txrow .tag { white-space: nowrap; }
+.txrow.fav { background: color-mix(in srgb, var(--accent2) 7%, transparent); }
+.txd { flex: 1; }
+.tbl td.wrap { white-space: normal; min-width: 260px; text-align: left; }

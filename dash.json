@@ -11,6 +11,8 @@
   "standalone": "Start-NHLDash.bat",
   "dataSources": [
     { "name": "NHL web and stats APIs (api-web.nhle.com, api.nhle.com, assets.nhle.com)", "terms": "https://www.nhl.com/info/terms-of-service" },
-    { "name": "MoneyPuck.com season data (optional, off by default)", "terms": "https://moneypuck.com/data.htm" }
+    { "name": "ESPN public NHL endpoints (injuries and transactions only)", "terms": "https://disneytermsofuse.com/english/" },
+    { "name": "MoneyPuck.com season data (optional, off by default)", "terms": "https://moneypuck.com/data.htm" },
+    { "name": "GitHub releases (update check)", "terms": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service" }
   ]
 }

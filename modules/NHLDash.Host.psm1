@@ -38,6 +38,7 @@ $script:WorkerHandle = $null
 
 $script:NhlApi = 'https://api-web.nhle.com/v1/'
 $script:NhlStats = 'https://api.nhle.com/stats/rest/en/'
+$script:Espn = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/'
 $script:LogoBase = 'https://assets.nhle.com/logos/nhl/svg/'
 $script:MoneyPuck = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/'
 
@@ -126,6 +127,8 @@ function Resolve-DataKey {
     if ($k -eq 'rookies') {
         return @{ Key = $k; Url = $script:NhlStats + 'skater/summary?isAggregate=false&isGame=false&sort=%5B%7B%22property%22:%22points%22,%22direction%22:%22DESC%22%7D%5D&start=0&limit=100&cayenneExp=isRookie%3D%271%27%20and%20seasonId%3D' + (Get-SeasonId) + '%20and%20gameTypeId%3D2'; File = 'rookies.json'; Kind = 'json'; Ttl = 3600 }
     }
+    if ($k -eq 'espn:injuries') { return @{ Key = $k; Url = $script:Espn + 'injuries'; File = 'espn-injuries.json'; Kind = 'json'; Ttl = 1800 } }
+    if ($k -eq 'espn:transactions') { return @{ Key = $k; Url = $script:Espn + 'transactions?limit=1000'; File = 'espn-transactions.json'; Kind = 'json'; Ttl = 1800 } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }

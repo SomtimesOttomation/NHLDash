@@ -540,7 +540,10 @@ views.team = (k) => {
       <div class="kpis"><div><b>${p(row.xGoalsPercentage)}</b><small>xGF% all</small></div><div><b>${p(r5?.xGoalsPercentage)}</b><small>xGF% 5v5</small></div><div><b>${p(row.corsiPercentage)}</b><small>CF%</small></div><div><b>${row.xGoalsFor.toFixed(1)}-${row.xGoalsAgainst.toFixed(1)}</b><small>xGF-xGA</small></div></div>
       ${top.length ? `<p class="muted small">Top xG: ${top.map((t) => `${esc(t.name)} ${t.I_F_xGoals.toFixed(1)}`).join(' &middot; ')}</p>` : ''}</section>` : `<section class="card">${status('mp:teams') || '<p class="muted">No MoneyPuck row for this team yet.</p>'}</section>`;
   }
-  return head + schedule + mp + skaters;
+  if (get('espn:injuries') === undefined && !store.get('espn:injuries')?.asked) { store.set('espn:injuries', { asked: true }); bridge.request('data.get', { key: 'espn:injuries', cacheOnly: true }).catch(() => {}); }
+  const inj = injuryList().filter((i) => i.k === k);
+  const injCard = inj.length ? `<section class="card wide"><h2>Injuries <span class="muted small">ESPN, saved ${esc(ago(store.get('espn:injuries')?.at))}</span></h2>${injTable(inj, false)}</section>` : '';
+  return head + schedule + mp + injCard + skaters;
 };
 
 
@@ -886,6 +889,92 @@ views.compare = (arg) => {
   return `<section class="card cmp">${head}<h3 class="sub">This season${goalie ? '' : ' and career'}</h3>${rows.join('')}</section>`;
 };
 
+
+// ------------------------------------------------------------------ moves: transactions, injuries, free agents (ESPN, fetched when opened)
+const ESPN_ABBR = { LA: 'LAK', SJ: 'SJS', NJ: 'NJD', TB: 'TBL', UTAH: 'UTA', WAS: 'WSH' };
+const espnTeam = (t) => ESPN_ABBR[t?.abbreviation] || t?.abbreviation || Object.keys(TEAMS).find((k) => TEAMS[k] === t?.displayName) || '';
+const byName = (n) => Object.keys(TEAMS).find((k) => TEAMS[k].normalize('NFD').replace(/[̀-ͯ]/g, '') === String(n).normalize('NFD').replace(/[̀-ͯ]/g, '')) || '';
+const movesTabs = (on) => `<div class="segs bar1">${[['transactions', 'Transactions'], ['injuries', 'Injuries'], ['freeagents', 'Free agents']].map(([k, l]) => `<a class="seg${on === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}<span class="muted small push">From ESPN's public NHL feed, downloaded when you open these pages.</span></div>`;
+let txFilter = { team: '', q: '' };
+let txShow = 60;
+document.addEventListener('click', (e) => { if (e.target.id === 'tx-more') { txShow += 120; render(); } });
+function moveKind(d) {
+  if (/traded|acquired/i.test(d)) return 'Trade';
+  if (/waiver/i.test(d)) return 'Waivers';
+  if (/injured reserve|long-term injured/i.test(d)) return 'Injury';
+  if (/^(signed|agreed)/i.test(d)) return 'Signing';
+  if (/released|terminat/i.test(d)) return 'Release';
+  if (/recalled|assigned|sent|loaned|reassigned/i.test(d)) return 'Call-up / send-down';
+  return 'Other';
+}
+views.transactions = () => {
+  routeKeys = ['espn:transactions']; want('espn:transactions');
+  const d = get('espn:transactions');
+  if (!d) return movesTabs('transactions') + (status('espn:transactions') || '<div class="note">Loading...</div>');
+  const q = txFilter.q.toLowerCase();
+  const rows = (d.transactions || []).map((t) => ({ ...t, k: espnTeam(t.team), kind: moveKind(t.description) }))
+    .filter((t) => (!txFilter.team || t.k === txFilter.team) && (!q || t.description.toLowerCase().includes(q)));
+  return movesTabs('transactions') + `<section class="card wide"><div class="filters"><select id="tx-team"><option value="">All teams</option>${Object.entries(TEAMS).map(([k, v]) => `<option value="${k}"${txFilter.team === k ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <input id="tx-q" type="search" placeholder="Filter (a name, 'waivers', 'trade')" value="${esc(txFilter.q)}"><span class="muted small">${rows.length} moves</span></div>
+    ${rows.slice(0, txShow).map((t) => `<div class="txrow${favs().has(t.k) ? ' fav' : ''}"><span class="sdate">${esc(new Date(t.date).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>${t.k ? `<a href="#/team/${t.k}">${logo(t.k, 'slogo')}</a>` : ''}<span class="tag">${esc(t.kind)}</span><span class="txd">${esc(t.description)}</span></div>`).join('') || '<p class="muted">No moves match.</p>'}${rows.length > txShow ? `<div class="actions"><button class="btn" type="button" id="tx-more">Show more (${rows.length - txShow} left)</button></div>` : ''}</section>`;
+};
+document.addEventListener('change', (e) => { if (e.target.id === 'tx-team') { txFilter.team = e.target.value; render(); } });
+document.addEventListener('input', (e) => { if (e.target.id === 'tx-q') { txFilter.q = e.target.value; clearTimeout(views._t); views._t = setTimeout(render, 250); } });
+
+function injuryList() {
+  const d = get('espn:injuries');
+  const out = [];
+  for (const t of d?.injuries || []) { const k = byName(t.displayName); for (const i of t.injuries || []) out.push({ k, name: i.athlete?.displayName, pos: i.athlete?.position, status: i.status, date: i.date, comment: i.shortComment, part: i.details?.type, back: i.details?.returnDate }); }
+  return out;
+}
+const injTable = (list, showTeam) => `<div class="tscroll"><table class="tbl"><thead><tr>${showTeam ? '<th class="l">Team</th>' : ''}<th class="l">Player</th><th>Pos</th><th class="l">Status</th><th class="l">Injury</th><th>Expected back</th><th class="l">Note</th></tr></thead><tbody>
+  ${list.map((i) => `<tr class="${favs().has(i.k) ? 'fav' : ''}">${showTeam ? `<td class="l">${i.k ? `<a class="tlink" href="#/team/${i.k}">${logo(i.k, 'slogo')} ${esc(i.k)}</a>` : ''}</td>` : ''}<td class="l"><b>${esc(i.name)}</b></td><td>${esc(i.pos || '')}</td><td class="l"><span class="tag">${esc(i.status || '')}</span></td><td class="l">${esc(i.part || '')}</td><td>${i.back ? esc(new Date(i.back + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })) : ''}</td><td class="l wrap small">${esc(i.comment || '')}</td></tr>`).join('')}</tbody></table></div>`;
+views.injuries = () => {
+  routeKeys = ['espn:injuries']; want('espn:injuries');
+  if (!get('espn:injuries')) return movesTabs('injuries') + (status('espn:injuries') || '<div class="note">Loading...</div>');
+  const list = injuryList().sort((a, b) => (favs().has(b.k) - favs().has(a.k)) || a.k.localeCompare(b.k));
+  return movesTabs('injuries') + `<section class="card wide"><h2>Injuries <span class="muted small">${list.length} players</span></h2>${injTable(list, true)}</section>`;
+};
+
+// Free agents: players the transactions show as released, waived to terminate, or out of a tryout,
+// with nothing later (signed, claimed, acquired) under the same name. Approximate, like NBADash's list.
+let faWatch = (() => { try { return JSON.parse(localStorage.getItem('faWatch')) || []; } catch { return []; } })();
+function freeAgents() {
+  const tx = (get('espn:transactions')?.transactions || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const fa = new Map();
+  for (const t of tx) {
+    const d = t.description;
+    for (const part of d.split(/(?<=\.)\s+/)) {
+      const release = /^Released\b/.test(part) && !/\bto\b/.test(part);
+      const uncond = /unconditional waivers|terminat/i.test(part);
+      if (release || uncond) {
+        const body = part.replace(/^(Released|Placed|Waived)\s+/, '').replace(/\s+(on unconditional waivers|from (their|his) (professional )?tryout.*|for the purpose.*)\.?$/i, '').replace(/\.$/, '');
+        const names = body.replace(/\b(Fs|Ds|Gs|F|D|G|C|LW|RW)\s+/g, '').split(/,\s*|\s+and\s+/).map((x) => x.trim()).filter((x) => /^[A-Z][\w'.-]+(\s+[A-Z][\w'.-]+)+$/.test(x));
+        const why = /tryout/i.test(part) ? 'Released from tryout' : uncond ? 'Contract terminated' : 'Released';
+        for (const n of names) fa.set(n, { name: n, k: espnTeam(t.team), date: t.date, why });
+      }
+    }
+    for (const n of [...fa.keys()]) if (t.date > fa.get(n).date && d.includes(n) && /(Signed|Claimed|Acquired|Agreed)/.test(d)) fa.delete(n);
+  }
+  return [...fa.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+views.freeagents = () => {
+  routeKeys = ['espn:transactions']; want('espn:transactions');
+  if (!get('espn:transactions')) return movesTabs('freeagents') + (status('espn:transactions') || '<div class="note">Loading...</div>');
+  const list = freeAgents();
+  const watched = list.filter((p) => faWatch.includes(p.name));
+  const row = (p) => `<tr><td class="l"><button class="star${faWatch.includes(p.name) ? ' on' : ''}" type="button" data-fa="${esc(p.name)}" title="Watch list">${faWatch.includes(p.name) ? '★' : '☆'}</button> <b>${esc(p.name)}</b></td><td class="l">${p.k ? `${logo(p.k, 'slogo')} ${esc(p.k)}` : ''}</td><td class="l">${esc(p.why)}</td><td>${esc(new Date(p.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</td></tr>`;
+  const head = '<thead><tr><th class="l">Player</th><th class="l">Last team</th><th class="l">How</th><th>Date</th></tr></thead>';
+  return movesTabs('freeagents') + (watched.length ? `<section class="card wide"><h2>Watch list</h2><table class="tbl">${head}<tbody>${watched.map(row).join('')}</tbody></table></section>` : '') +
+    `<section class="card wide"><h2>Free agents <span class="muted small">${list.length} players</span></h2><p class="muted small">Players the transaction log shows as released, waived to end their contract, or let go from a tryout, with no later signing or claim. Built from the log, so it can miss moves the log does not mention.</p><table class="tbl">${head}<tbody>${list.map(row).join('')}</tbody></table></section>`;
+};
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fa]'); if (!b) return;
+  const n = b.dataset.fa; faWatch = faWatch.includes(n) ? faWatch.filter((x) => x !== n) : [...faWatch, n];
+  try { localStorage.setItem('faWatch', JSON.stringify(faWatch)); } catch { }
+  render();
+});
+
 // ------------------------------------------------------------------ updates (same window and steps as NBADash)
 const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
 const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
@@ -972,6 +1061,9 @@ function parseRoute() {
   if (h === '#/rookies') return { view: 'rookies', tab: 'rookies' };
   if (h === '#/eastwest') return { view: 'eastwest', tab: 'rankings' };
   if ((m = h.match(/^#\/compare\/((?:team\/[A-Z]{3}\/[A-Z]{3})|(?:player\/\d{7,8}\/\d{7,8}))$/))) return { view: 'compare', arg: m[1], tab: '' };
+  if (h === '#/transactions') return { view: 'transactions', tab: 'moves' };
+  if (h === '#/injuries') return { view: 'injuries', tab: 'moves' };
+  if (h === '#/freeagents') return { view: 'freeagents', tab: 'moves' };
   if (h === '#/traffic') return { view: 'traffic', tab: '' };
   if ((m = h.match(/^#\/player\/(\d{7,8})$/))) return { view: 'player', arg: m[1], tab: '' };
   if ((m = h.match(/^#\/team\/([A-Z]{3})$/))) return { view: 'team', arg: m[1], tab: '' };
