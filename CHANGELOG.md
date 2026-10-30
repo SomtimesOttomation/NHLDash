@@ -6,6 +6,11 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.4.3 (2026-10-30)
+
+**Bug/Fix**
+- Scores games and day arrows are centred on days with fewer than four games.
+
 ## 0.4.2 (2026-10-30)
 
 **Redesign**
