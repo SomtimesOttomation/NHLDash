@@ -14,7 +14,7 @@ let routeKeys = [];               // keys the current view needs (Refresh refetc
 // ------------------------------------------------------------------ data
 async function want(key, force = false) {
   const cur = store.get(key) || {};
-  if (!force && (cur.body !== undefined || cur.loading)) return;
+  if (!force && (cur.body !== undefined || cur.loading || cur.error)) return;   // a failed key waits for Refresh
   store.set(key, { ...cur, loading: true, error: null });
   try { await bridge.request('data.get', { key, force }); }
   catch (e) { store.set(key, { ...store.get(key), loading: false, error: e.message }); render(); }
@@ -299,7 +299,7 @@ views.standings = (hl) => {
   const order = Object.keys(groups).sort();
   const seg = (v, l) => `<button type="button" class="seg${standMode === v ? ' on' : ''}" data-stand="${v}">${l}</button>`;
   return `<div class="segs bar1">${seg('division', 'Division')}${seg('conference', 'Conference')}${seg('league', 'League')}
-      <span class="muted small push">Updated ${esc(ago(store.get('standings')?.at))}</span></div>
+      <span class="muted small push">Updated ${esc(ago(store.get('standings')?.at))}</span><a class="btn small-btn" href="#/eastwest">East-West report</a></div>
     <div class="grid two stand">${order.map((gname) => `<section class="card"><h2>${esc(gname)}</h2><div class="tscroll"><table class="tbl">
       <thead><tr><th></th><th class="l">Team</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>PTS</th><th>P%</th><th>RW</th><th>GF</th><th>GA</th><th>DIFF</th><th>L10</th><th>STRK</th></tr></thead><tbody>
       ${groups[gname].sort((a, b) => a[seq] - b[seq]).map((t) => {
@@ -497,6 +497,7 @@ views.team = (k) => {
   const rec = st ? `<div class="trec"><b>${st.wins}-${st.losses}-${st.otLosses}</b> &middot; ${st.points} pts &middot; ${ordinal(st.divisionSequence)} in the ${esc(st.divisionName)} &middot; L10 ${st.l10Wins}-${st.l10Losses}-${st.l10OtLosses} &middot; ${esc(st.streakCode || '')}${st.streakCount || ''} streak &middot; GF ${st.goalFor} / GA ${st.goalAgainst}</div>` : '';
   const head = `<section class="card thead" style="--tc:${teamColor(k)}">${logo(k, 'blogo')}
       <div><div class="big2">${esc(TEAMS[k])}</div>${rec || '<div class="muted small">Record loads with the standings.</div>'}</div>
+      <button class="btn cmpbtn" type="button" data-cmp="team:${k}" title="Compare with another team">Compare</button>
       <button class="star big${fav ? ' on' : ''}" type="button" data-star="${k}" title="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${fav ? '★' : '☆'}</button></section>`;
 
   // Schedule: regular season and playoffs (preseason only if that is all there is yet).
@@ -562,7 +563,7 @@ views.player = (id) => {
   const head = `<section class="card thead" style="--tc:${teamColor(team)}">${team ? `<a href="#/team/${team}">${logo(team, 'blogo')}</a>` : ''}
       <div><div class="big2">${esc(nm(L.firstName))} ${esc(nm(L.lastName))} <span class="muted">#${L.sweaterNumber ?? ''}</span></div>
       <div class="muted">${esc({ C: 'Centre', L: 'Left wing', R: 'Right wing', D: 'Defence', G: 'Goalie' }[L.position] || L.position)}${team ? ` &middot; <a class="tlink" href="#/team/${team}">${esc(nm(L.fullTeamName) || team)}</a>` : L.isActive ? '' : ' &middot; Not active'}</div>
-      <div class="bio">${bio}</div></div></section>`;
+      <div class="bio">${bio}</div></div><button class="btn cmpbtn" type="button" data-cmp="player:${id}" title="Compare with another player">Compare</button></section>`;
 
   const fs = L.featuredStats?.regularSeason;
   const ss = fs?.subSeason, cr = fs?.career;
@@ -715,6 +716,176 @@ views.traffic = () => {
     <section class="card wide"><h2>Last requests</h2>${(t.last || []).length ? `<div class="tscroll"><table class="tbl"><thead><tr><th class="l">Time</th><th class="l">What</th><th class="l">Server</th><th>Size</th><th>Time taken</th><th>Result</th></tr></thead><tbody>${t.last.map((r) => `<tr><td class="l">${esc(new Date(r.at).toLocaleTimeString())}</td><td class="l">${esc(r.key)}</td><td class="l">${esc(r.host)}</td><td>${(r.bytes / 1024).toFixed(1)} KB</td><td>${r.ms} ms</td><td>${r.ok ? 'OK' : '<span class="upd-err">failed</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">None yet.</p>'}</section>`;
 };
 
+
+// ------------------------------------------------------------------ league pages built from the saved season
+// Records from saved games. upTo (YYYY-MM-DD, exclusive) lets rankings compare with a week ago.
+function teamRecords(upTo) {
+  const rec = {};
+  const games = seasonGames().filter((g) => g.gameType === 2 && isFinal(g) && (!upTo || g.date < upTo)).sort((a, b) => a.date.localeCompare(b.date));
+  for (const g of games) {
+    const ot = ['OT', 'SO'].includes(g.gameOutcome?.lastPeriodType);
+    for (const [me, op] of [[g.awayTeam, g.homeTeam], [g.homeTeam, g.awayTeam]]) {
+      const r = (rec[me.abbrev] ||= { gp: 0, w: 0, l: 0, o: 0, gf: 0, ga: 0, res: [], opps: [] });
+      r.gp++; r.gf += me.score; r.ga += op.score; r.opps.push(op.abbrev);
+      const p = me.score > op.score ? 2 : ot ? 1 : 0;
+      if (p === 2) r.w++; else if (p === 1) r.o++; else r.l++;
+      r.res.push(p);
+    }
+  }
+  for (const r of Object.values(rec)) {
+    r.pct = r.gp ? (2 * r.w + r.o) / (2 * r.gp) : 0;
+    const l10 = r.res.slice(-10); r.l10 = l10.length ? l10.reduce((a, b) => a + b, 0) / (2 * l10.length) : 0;
+    r.gdpg = r.gp ? (r.gf - r.ga) / r.gp : 0;
+  }
+  for (const r of Object.values(rec)) r.sos = r.opps.length ? r.opps.reduce((a, k) => a + (rec[k]?.pct || 0), 0) / r.opps.length : 0;
+  return rec;
+}
+const FORMULA = 'Score = 45% points % + 25% goal difference per game (scaled from -2 to +2) + 15% points % in the last 10 games + 15% strength of schedule (average opponent points %), or + 15% expected-goals share (xGF%) when MoneyPuck is on.';
+function powerScores(rec, xg) {
+  const out = [];
+  for (const [k, r] of Object.entries(rec)) {
+    const gd = Math.max(0, Math.min(1, (r.gdpg + 2) / 4));
+    const last = xg && xg[k] != null ? xg[k] : r.sos;
+    out.push({ k, r, score: 100 * (0.45 * r.pct + 0.25 * gd + 0.15 * r.l10 + 0.15 * last) });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+function lastMonday() { const d = new Date(); d.setHours(12); while (d.getDay() !== 1) d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+const needSync = (what) => `<section class="card narrow"><h2>${what}</h2><p>This page is built from the saved season, so it needs one season sync first.</p><p><button class="btn primary" type="button" id="btn-sync">Sync the season</button></p></section>`;
+
+views.rankings = () => {
+  routeKeys = [];
+  if (!weekList().length) return needSync('Power rankings');
+  let xg = null;
+  if (state.settings.moneypuck) { routeKeys = ['mp:teams']; want('mp:teams'); xg = {}; for (const r of get('mp:teams') || []) if (r.situation === 'all') xg[r.team] = r.xGoalsPercentage; if (!Object.keys(xg).length) xg = null; }
+  const now = powerScores(teamRecords(), xg);
+  const before = powerScores(teamRecords(lastMonday()), null);
+  const prevRank = Object.fromEntries(before.map((x, i) => [x.k, i + 1]));
+  const fav = favs();
+  return `<div class="segs bar1"><span class="muted small">Built from ${seasonGames().filter((g) => g.gameType === 2 && isFinal(g)).length} saved games. <span class="hint" title="${esc(FORMULA)}">How the score works</span></span><a class="btn push" href="#/eastwest">East-West report</a></div>
+    <section class="card wide"><h2>Power rankings</h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Move</th><th class="l">Team</th><th>Score</th><th>Record</th><th>P%</th><th>GD/GP</th><th>Last 10</th><th>${xg ? 'xGF%' : 'SOS'}</th></tr></thead><tbody>
+    ${now.map((x, i) => {
+      const was = prevRank[x.k], mv = was ? was - (i + 1) : 0;
+      const r = x.r;
+      return `<tr class="${fav.has(x.k) ? 'fav' : ''}"><td><b>${i + 1}</b></td><td class="${mv > 0 ? 'up' : mv < 0 ? 'down' : 'muted'}">${mv > 0 ? '&#9650;' + mv : mv < 0 ? '&#9660;' + -mv : '-'}</td><td class="l"><a class="tlink" href="#/team/${x.k}">${logo(x.k, 'slogo')} ${esc(TEAMS[x.k] || x.k)}</a></td><td><b>${x.score.toFixed(1)}</b></td><td>${r.w}-${r.l}-${r.o}</td><td>${r.pct.toFixed(3).replace(/^0/, '')}</td><td>${r.gdpg > 0 ? '+' : ''}${r.gdpg.toFixed(2)}</td><td>${(r.l10 * 100).toFixed(0)}%</td><td>${xg ? ((xg[x.k] ?? 0) * 100).toFixed(1) + '%' : r.sos.toFixed(3).replace(/^0/, '')}</td></tr>`;
+    }).join('')}</tbody></table></div><p class="muted small">Move compares with the rankings before this Monday. ${esc(FORMULA)}</p></section>`;
+};
+
+const ROOKIE_SCORE = 'Rookie score = 10 x (goals + 0.7 x assists + 0.1 x shots on goal + 0.1 x plus/minus) per game, so a point-a-game rookie lands near 10.';
+let rookieSort = 'score';
+views.rookies = () => {
+  routeKeys = ['rookies'];
+  want('rookies');
+  const d = get('rookies');
+  if (!d) return status('rookies') || '<div class="note">Loading...</div>';
+  const rows = (d.data || []).map((r) => ({ ...r, score: r.gamesPlayed ? 10 * (r.goals + 0.7 * r.assists + 0.1 * r.shots + 0.1 * r.plusMinus) / r.gamesPlayed : 0 }));
+  const minGp = 3;
+  rows.sort((a, b) => (b[rookieSort] ?? 0) - (a[rookieSort] ?? 0));
+  const shown = rows.filter((r) => r.gamesPlayed >= minGp);
+  const th = (k, l) => `<th class="sortable${rookieSort === k ? ' sorted' : ''}" data-rk="${k}">${l}${rookieSort === k ? ' &darr;' : ''}</th>`;
+  const toiAvg = (sec) => (sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '');
+  return `<section class="card wide"><h2>Rookie watch <span class="muted small">skaters with ${minGp}+ games &middot; <span class="hint" title="${esc(ROOKIE_SCORE)}">rookie score</span></span></h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th class="l">Rookie</th><th>Team</th><th>Pos</th>${th('gamesPlayed', 'GP')}${th('goals', 'G')}${th('assists', 'A')}${th('points', 'P')}${th('plusMinus', '+/-')}${th('ppPoints', 'PPP')}${th('shots', 'SOG')}${th('timeOnIcePerGame', 'TOI/GP')}${th('score', 'Rookie score')}</tr></thead><tbody>
+    ${shown.map((r, i) => `<tr class="${favs().has(r.teamAbbrevs) ? 'fav' : ''}"><td>${i + 1}</td><td class="l">${plink(r.playerId, esc(r.skaterFullName))}</td><td>${esc(r.teamAbbrevs)}</td><td>${esc(r.positionCode)}</td><td>${r.gamesPlayed}</td><td>${r.goals}</td><td>${r.assists}</td><td><b>${r.points}</b></td><td>${r.plusMinus > 0 ? '+' : ''}${r.plusMinus}</td><td>${r.ppPoints}</td><td>${r.shots}</td><td>${toiAvg(r.timeOnIcePerGame)}</td><td><b>${r.score.toFixed(1)}</b></td></tr>`).join('') || '<tr><td colspan="13" class="muted l">No rookies with enough games yet.</td></tr>'}</tbody></table></div><p class="muted small">${esc(ROOKIE_SCORE)} Rookie list from the NHL stats API.</p></section>`;
+};
+document.addEventListener('click', (e) => { const h = e.target.closest('[data-rk]'); if (h) { rookieSort = h.dataset.rk; render(); } });
+
+views.eastwest = () => {
+  routeKeys = ['standings'];
+  want('standings');
+  if (!weekList().length) return needSync('East-West report');
+  const st = get('standings');
+  if (!st) return status('standings') || '<div class="note">Loading...</div>';
+  const conf = {}, div = {};
+  for (const t of st.standings || []) { const k = nm(t.teamAbbrev); conf[k] = t.conferenceName; div[k] = t.divisionName; }
+  const games = seasonGames().filter((g) => g.gameType === 2 && isFinal(g) && conf[g.awayTeam.abbrev] && conf[g.homeTeam.abbrev] && conf[g.awayTeam.abbrev] !== conf[g.homeTeam.abbrev]);
+  const side = { Eastern: { w: 0, l: 0, o: 0, gf: 0 }, Western: { w: 0, l: 0, o: 0, gf: 0 } };
+  const team = {}, dv = {};
+  for (const g of games) {
+    const ot = ['OT', 'SO'].includes(g.gameOutcome?.lastPeriodType);
+    for (const [me, op] of [[g.awayTeam, g.homeTeam], [g.homeTeam, g.awayTeam]]) {
+      const c = conf[me.abbrev], won = me.score > op.score;
+      const add = (r) => { r.gf += me.score; if (won) r.w++; else if (ot) r.o++; else r.l++; };
+      add(side[c]);
+      add(team[me.abbrev] ||= { w: 0, l: 0, o: 0, gf: 0 });
+      add((dv[div[me.abbrev]] ||= {})[div[op.abbrev]] ||= { w: 0, l: 0, o: 0, gf: 0 });
+    }
+  }
+  const pct = (r) => { const gp = r.w + r.l + r.o; return gp ? ((2 * r.w + r.o) / (2 * gp)).toFixed(3).replace(/^0/, '') : '-'; };
+  const rec = (r) => (r ? `${r.w}-${r.l}-${r.o}` : '-');
+  const E = side.Eastern, W = side.Western;
+  const lead = E.w === W.w ? 'Level so far' : E.w > W.w ? 'The East leads' : 'The West leads';
+  const eastDiv = ['Atlantic', 'Metropolitan'], westDiv = ['Central', 'Pacific'];
+  const teams = Object.entries(team).sort((a, b) => pct(b[1]) - pct(a[1]) || b[1].w - a[1].w);
+  return `<section class="card wide"><h2>East-West report <span class="muted small">${games.length} games between the conferences</span></h2>
+      <div class="kpis"><div><b>${rec(E)}</b><small>East vs West</small></div><div><b>${rec(W)}</b><small>West vs East</small></div><div><b>${E.gf}-${W.gf}</b><small>goals East-West</small></div><div><b>${esc(lead)}</b><small>by wins</small></div></div></section>
+    <div class="grid two"><section class="card"><h2>Division vs division</h2><table class="tbl"><thead><tr><th class="l">East division</th>${westDiv.map((d) => `<th>vs ${d}</th>`).join('')}</tr></thead><tbody>
+      ${eastDiv.map((d) => `<tr><td class="l">${d}</td>${westDiv.map((w) => `<td>${rec(dv[d]?.[w])}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      <p class="muted small">Records are the East division's, as W-L-OTL.</p></section>
+      <section class="card"><h2>Teams against the other conference</h2><table class="tbl"><thead><tr><th class="l">Team</th><th>Conf</th><th>Record</th><th>P%</th></tr></thead><tbody>
+      ${teams.map(([k, r]) => `<tr class="${favs().has(k) ? 'fav' : ''}"><td class="l"><a class="tlink" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a></td><td>${conf[k] === 'Eastern' ? 'E' : 'W'}</td><td>${rec(r)}</td><td>${pct(r)}</td></tr>`).join('')}</tbody></table></section></div>`;
+};
+
+// ------------------------------------------------------------------ compare (two teams or two players)
+let cmp = (() => { try { return JSON.parse(localStorage.getItem('cmp')) || { type: '', ids: [] }; } catch { return { type: '', ids: [] }; } })();
+function saveCmp() { try { localStorage.setItem('cmp', JSON.stringify(cmp)); } catch { } renderCmpBar(); }
+function addCmp(type, id) {
+  if (cmp.type !== type) cmp = { type, ids: [] };
+  if (!cmp.ids.includes(id)) cmp.ids = [...cmp.ids, id].slice(-2);
+  saveCmp();
+  if (cmp.ids.length === 2) location.hash = `#/compare/${type}/${cmp.ids[0]}/${cmp.ids[1]}`;
+}
+function cmpName(type, id) {
+  if (type === 'team') return TEAMS[id] || id;
+  const L = get(`player:${id}`);
+  return L ? `${nm(L.firstName)} ${nm(L.lastName)}` : `Player ${id}`;
+}
+function renderCmpBar() {
+  const el = $('cmpbar');
+  el.hidden = !cmp.ids.length || parseRoute().view === 'compare';
+  if (el.hidden) return;
+  el.innerHTML = `<span class="muted small">Compare:</span>${cmp.ids.map((id) => `<span class="favchip">${esc(cmpName(cmp.type, id))} <button type="button" class="xbtn" data-cmpx="${id}" aria-label="Remove">&times;</button></span>`).join('')}
+    <span class="muted small">${cmp.ids.length < 2 ? `pick one more ${cmp.type}` : ''}</span><button type="button" class="xbtn" data-cmpx="*" title="Clear">Clear</button>`;
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-cmp]');
+  if (a) { const [t, id] = a.dataset.cmp.split(':'); addCmp(t, id); return; }
+  const x = e.target.closest('[data-cmpx]');
+  if (x) { cmp.ids = x.dataset.cmpx === '*' ? [] : cmp.ids.filter((i) => i !== x.dataset.cmpx); saveCmp(); }
+});
+views.compare = (arg) => {
+  const [type, a, b] = arg.split('/');
+  const bar = (l, va, vb, fmt = (v) => v, lowBetter = false) => {
+    const na = Number(va) || 0, nb = Number(vb) || 0, tot = Math.abs(na) + Math.abs(nb) || 1;
+    const aw = lowBetter ? na < nb : na > nb, bw = lowBetter ? nb < na : nb > na;
+    return `<div class="cmprow"><span class="${aw ? 'b' : ''}">${va == null ? '-' : fmt(va)}</span><div class="cmpmid"><small>${l}</small><div class="cmpbars"><i style="width:${(Math.abs(na) / tot) * 100}%" class="${aw ? 'win' : ''}"></i><i style="width:${(Math.abs(nb) / tot) * 100}%" class="${bw ? 'win' : ''}"></i></div></div><span class="${bw ? 'b' : ''}">${vb == null ? '-' : fmt(vb)}</span></div>`;
+  };
+  const p3 = (v) => Number(v).toFixed(3).replace(/^0/, '');
+  if (type === 'team') {
+    routeKeys = ['standings']; want('standings');
+    const st = get('standings');
+    if (!st) return status('standings') || '<div class="note">Loading...</div>';
+    const T = (k) => (st.standings || []).find((t) => nm(t.teamAbbrev) === k) || {};
+    const A = T(a), B = T(b);
+    const mp = {}; if (state.settings.moneypuck) { routeKeys.push('mp:teams'); want('mp:teams'); for (const r of get('mp:teams') || []) if (r.situation === 'all') mp[r.team] = r; }
+    const h2h = seasonGames().filter((g) => isFinal(g) && g.gameType >= 2 && [g.awayTeam.abbrev, g.homeTeam.abbrev].sort().join() === [a, b].sort().join());
+    const rows = [bar('Points', A.points, B.points), bar('Points %', A.pointPctg, B.pointPctg, p3), bar('Wins', A.wins, B.wins), bar('Regulation wins', A.regulationWins, B.regulationWins), bar('Goals for', A.goalFor, B.goalFor), bar('Goals against', A.goalAgainst, B.goalAgainst, (v) => v, true), bar('Goal difference', A.goalDifferential, B.goalDifferential), bar('Last 10 wins', A.l10Wins, B.l10Wins)];
+    if (mp[a] && mp[b]) rows.push(bar('xGF% (MoneyPuck)', mp[a].xGoalsPercentage, mp[b].xGoalsPercentage, (v) => (v * 100).toFixed(1) + '%'), bar('CF% (MoneyPuck)', mp[a].corsiPercentage, mp[b].corsiPercentage, (v) => (v * 100).toFixed(1) + '%'));
+    return `<section class="card cmp"><div class="cmphead"><a href="#/team/${a}">${logo(a, 'blogo')}<b>${esc(TEAMS[a] || a)}</b></a><span class="muted">vs</span><a href="#/team/${b}">${logo(b, 'blogo')}<b>${esc(TEAMS[b] || b)}</b></a></div>${rows.join('')}
+      <h3 class="sub">Head to head this season</h3>${h2h.length ? h2h.map((g) => `<a class="sline" href="#/game/${g.id}"><span class="sdate">${esc(new Date(g.date + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span><span>${esc(g.awayTeam.abbrev)} ${g.awayTeam.score} @ ${esc(g.homeTeam.abbrev)} ${g.homeTeam.score}</span><span class="sres muted">${esc(gameStatus(g))}</span></a>`).join('') : `<p class="muted">${weekList().length ? 'No meetings yet.' : 'Sync the season to see their meetings.'}</p>`}</section>`;
+  }
+  routeKeys = [`player:${a}`, `player:${b}`]; routeKeys.forEach((k) => want(k));
+  const A = get(`player:${a}`), B = get(`player:${b}`);
+  if (!A || !B) return status(`player:${a}`) || status(`player:${b}`) || '<div class="note">Loading...</div>';
+  const sa = A.featuredStats?.regularSeason?.subSeason || {}, sb = B.featuredStats?.regularSeason?.subSeason || {};
+  const ca = A.careerTotals?.regularSeason || {}, cb = B.careerTotals?.regularSeason || {};
+  const goalie = A.position === 'G' && B.position === 'G';
+  const head = `<div class="cmphead">${[[a, A], [b, B]].map(([id, P]) => `<a href="#/player/${id}">${logo(P.currentTeamAbbrev, 'blogo')}<b>${esc(nm(P.firstName))} ${esc(nm(P.lastName))}</b><small class="muted">${esc(P.position)} &middot; ${esc(P.currentTeamAbbrev || '')}</small></a>`).join('<span class="muted">vs</span>')}</div>`;
+  const rows = goalie
+    ? [bar('Games', sa.gamesPlayed, sb.gamesPlayed), bar('Wins', sa.wins, sb.wins), bar('Save %', sa.savePctg, sb.savePctg, p3), bar('Goals against avg.', sa.goalsAgainstAvg, sb.goalsAgainstAvg, (v) => Number(v).toFixed(2), true), bar('Shutouts', sa.shutouts, sb.shutouts), bar('Career wins', ca.wins, cb.wins), bar('Career save %', ca.savePctg, cb.savePctg, p3)]
+    : [bar('Games', sa.gamesPlayed, sb.gamesPlayed), bar('Goals', sa.goals, sb.goals), bar('Assists', sa.assists, sb.assists), bar('Points', sa.points, sb.points), bar('Points per game', sa.gamesPlayed ? sa.points / sa.gamesPlayed : 0, sb.gamesPlayed ? sb.points / sb.gamesPlayed : 0, (v) => Number(v).toFixed(2)), bar('Plus/minus', sa.plusMinus, sb.plusMinus), bar('Power-play points', sa.powerPlayPoints, sb.powerPlayPoints), bar('Shots', sa.shots, sb.shots), bar('Career points', ca.points, cb.points), bar('Career goals', ca.goals, cb.goals)];
+  return `<section class="card cmp">${head}<h3 class="sub">This season${goalie ? '' : ' and career'}</h3>${rows.join('')}</section>`;
+};
+
 // ------------------------------------------------------------------ updates (same window and steps as NBADash)
 const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
 const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
@@ -797,6 +968,10 @@ function parseRoute() {
   let m;
   if ((m = h.match(/^#\/game\/(\d{10})$/))) return { view: 'game', arg: m[1], tab: 'scores' };
   if ((m = h.match(/^#\/week\/(\d{1,2})$/))) return { view: 'week', arg: m[1], tab: '' };
+  if (h === '#/rankings') return { view: 'rankings', tab: 'rankings' };
+  if (h === '#/rookies') return { view: 'rookies', tab: 'rookies' };
+  if (h === '#/eastwest') return { view: 'eastwest', tab: 'rankings' };
+  if ((m = h.match(/^#\/compare\/((?:team\/[A-Z]{3}\/[A-Z]{3})|(?:player\/\d{7,8}\/\d{7,8}))$/))) return { view: 'compare', arg: m[1], tab: '' };
   if (h === '#/traffic') return { view: 'traffic', tab: '' };
   if ((m = h.match(/^#\/player\/(\d{7,8})$/))) return { view: 'player', arg: m[1], tab: '' };
   if ((m = h.match(/^#\/team\/([A-Z]{3})$/))) return { view: 'team', arg: m[1], tab: '' };
@@ -821,6 +996,7 @@ function render() {
   const focusId = document.activeElement?.id;
   renderBanner(r.view === 'team' ? r.arg : '');
   renderWeekBar(r.view === 'week' ? Number(r.arg) : 0);
+  renderCmpBar();
   $('view').innerHTML = views[r.view](r.arg);
   if (focusId && $(focusId) && focusId.startsWith('set-')) $(focusId).focus();
   window.scrollTo(0, y);
