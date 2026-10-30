@@ -6,6 +6,9 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+**Housekeeping**
+- Publishing a release now builds and attaches the update zip and checksum automatically.
+
 ## 0.4.1 (2026-10-29)
 
 **Redesign**
