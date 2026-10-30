@@ -6,6 +6,11 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.4.2 (2026-10-30)
+
+**Redesign**
+- Scores page and team logos laid out and sized like NBADash.
+
 **Housekeeping**
 - Publishing a release now builds and attaches the update zip and checksum automatically.
 
