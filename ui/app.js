@@ -397,7 +397,7 @@ views.settings = () => {
       <p class="small">NHL web API (api-web.nhle.com): scores, game centre, standings, leaders. Unofficial and undocumented; it can change without notice. <a href="https://www.nhl.com/info/terms-of-service" target="_blank" rel="noreferrer">NHL terms</a></p>
       <p class="small">MoneyPuck.com season files (only when turned on). <a href="https://moneypuck.com/data.htm" target="_blank" rel="noreferrer">MoneyPuck data terms</a></p>
       <p class="muted small">This session: ${t.requests} requests, ${(t.bytes / 1048576).toFixed(2)} MB, ${t.errors} errors.</p>
-      <div class="actions"><button id="set-clear" class="btn" type="button">Clear saved data</button></div></section>
+      <div class="actions"><button id="set-clear" class="btn" type="button">Clear saved data</button><a class="btn" href="#/traffic">Traffic details</a></div></section>
   </div>`;
 };
 function confirmDialog(title, html) {
@@ -437,7 +437,7 @@ document.addEventListener('change', async (e) => {
 });
 document.addEventListener('click', async (e) => {
   if (e.target.id !== 'set-clear') return;
-  try { await bridge.request('cache.clear'); store.clear(); alertNote('Saved data cleared. Logos are kept.'); } catch (err) { alertNote(err.message); }
+  try { await bridge.request('cache.clear'); store.clear(); loadSeason(); alertNote('Saved data cleared. Logos are kept.'); } catch (err) { alertNote(err.message); }
 });
 
 
@@ -608,6 +608,113 @@ views.player = (id) => {
     <section class="card wide"><h2>NHL career <span class="muted small">regular season</span></h2>${career}</section>`;
 };
 
+
+// ------------------------------------------------------------------ season: saved weeks, week bar, sync
+const season = { weeks: [], loaded: false, sync: null };   // weeks: [{ monday, cached }]
+async function loadSeason() {
+  try { season.weeks = await bridge.request('season.weeks'); } catch { season.weeks = []; }
+  season.loaded = true;
+  for (const w of season.weeks) if (w.cached && get(`week:${w.monday}`) === undefined) bridge.request('data.get', { key: `week:${w.monday}`, cacheOnly: true }).catch(() => {});
+  render();
+}
+// All saved games of the season (regular season and playoffs), newest last.
+function seasonGames() {
+  const out = [];
+  for (const w of season.weeks) for (const d of get(`week:${w.monday}`)?.gameWeek || []) for (const g of d.games || []) if (g.gameType >= 2) out.push({ ...g, date: d.date });
+  return out;
+}
+// Week numbers count from the first week that has a regular-season game.
+function weekList() {
+  const list = []; let n = 0;
+  for (const w of season.weeks) {
+    const b = get(`week:${w.monday}`);
+    if (!b) continue;
+    const games = (b.gameWeek || []).flatMap((d) => d.games || []).filter((g) => g.gameType >= 2);
+    if (!games.length && !n) continue;
+    n++; list.push({ n, monday: w.monday, games: games.length });
+  }
+  return list;
+}
+function renderWeekBar(activeN) {
+  const el = $('weekbar');
+  const weeks = weekList();
+  const s = season.sync;
+  el.innerHTML = `<span class="weekbar-label">Season</span>
+    <button class="btn small-btn" type="button" id="btn-sync"${s?.running || state.halted ? ' disabled' : ''}>${s?.running ? `Syncing ${s.pct}%` : weeks.length ? 'Sync season' : 'Sync the season'}</button>
+    ${weeks.map((w) => `<a class="weeklink${w.n === activeN ? ' active' : ''}" href="#/week/${w.n}" title="${esc(weekRange(w.monday))}">Week ${w.n}</a>`).join('')}
+    ${!weeks.length && season.loaded ? '<span class="muted small">Sync once to unlock week pages, power rankings, rookies and the East-West report.</span>' : ''}`;
+}
+function weekRange(monday) {
+  const a = new Date(monday + 'T12:00:00'), b = new Date(a); b.setDate(b.getDate() + 6);
+  const f = (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${f(a)} - ${f(b)}`;
+}
+async function runSync() {
+  const total = season.weeks.length;
+  const cached = season.weeks.filter((w) => w.cached).length;
+  if (!syncAck()) {
+    const ok = await confirmDialog('Sync the season?', `<p>NHLDash will download the NHL schedule and results one week at a time, about ${Math.max(2, total - cached + 3)} requests now. Weeks already saved are not downloaded again, so later syncs are only a few requests.</p><p class="muted">It runs in the background, keeps going if you switch tabs, and the pause button stops it.</p>`);
+    if (!ok) return;
+    try { localStorage.setItem('syncAck', '1'); } catch { }
+  }
+  try { const r = await bridge.request('sync.run'); if (r && r.started) { season.sync = { running: true, pct: 0 }; render(); } }
+  catch (e) { alertNote(e.message); }
+}
+const syncAck = () => { try { return localStorage.getItem('syncAck') === '1'; } catch { return false; } };
+document.addEventListener('click', (e) => { if (e.target.id === 'btn-sync') runSync(); });
+bridge.on('sync', async (d) => {
+  season.sync = d;
+  if (!d.running) {
+    season.sync = null;
+    if (!d.cancelled) { alertNote('Season sync finished.'); await loadSeason(); return; }
+  }
+  render();
+});
+
+views.week = (n) => {
+  n = Number(n);
+  const w = weekList().find((x) => x.n === n);
+  routeKeys = w ? [`week:${w.monday}`] : [];
+  if (!w) return '<div class="note">That week is not saved yet. Press <b>Sync season</b> in the bar above.</div>';
+  const b = get(`week:${w.monday}`);
+  const days = (b.gameWeek || []).filter((d) => (d.games || []).some((g) => g.gameType >= 2));
+  // Team records for the week.
+  const rec = {};
+  for (const d of days) for (const g of d.games) {
+    if (g.gameType < 2 || !isFinal(g)) continue;
+    const ot = ['OT', 'SO'].includes(g.gameOutcome?.lastPeriodType);
+    for (const [me, op] of [[g.awayTeam, g.homeTeam], [g.homeTeam, g.awayTeam]]) {
+      const r = (rec[me.abbrev] ||= { w: 0, l: 0, o: 0, gf: 0, ga: 0 });
+      r.gf += me.score; r.ga += op.score;
+      if (me.score > op.score) r.w++; else if (ot) r.o++; else r.l++;
+    }
+  }
+  const table = Object.entries(rec).sort((a, b) => (b[1].w * 2 + b[1].o) - (a[1].w * 2 + a[1].o) || (b[1].gf - b[1].ga) - (a[1].gf - a[1].ga));
+  const gameRow = (g) => {
+    const fin = isFinal(g), aw = fin && g.awayTeam.score > g.homeTeam.score;
+    return `<a class="sline" href="#/game/${g.id}">${logo(g.awayTeam.abbrev, 'slogo')}<span class="${fin && aw ? 'b' : ''}">${esc(g.awayTeam.abbrev)} ${fin ? g.awayTeam.score : ''}</span><span class="muted">@</span>${logo(g.homeTeam.abbrev, 'slogo')}<span class="${fin && !aw ? 'b' : ''}">${esc(g.homeTeam.abbrev)} ${fin ? g.homeTeam.score : ''}</span><span class="sres muted">${esc(gameStatus(g))}</span></a>`;
+  };
+  return `<div class="datebar"><a class="btn sq" href="#/week/${n - 1}" aria-label="Previous week"${n <= 1 ? ' hidden' : ''}>&lsaquo;</a><strong>Week ${n} &middot; ${esc(weekRange(w.monday))}</strong><a class="btn sq" href="#/week/${n + 1}" aria-label="Next week"${weekList().some((x) => x.n === n + 1) ? '' : ' hidden'}>&rsaquo;</a></div>
+    <div class="grid two"><section class="card"><h2>Games</h2>${days.map((d) => `<h3 class="sub">${esc(niceDate(d.date))}</h3>${d.games.filter((g) => g.gameType >= 2).map(gameRow).join('')}`).join('') || '<p class="muted">No games.</p>'}</section>
+      <section class="card"><h2>Team records this week</h2>${table.length ? `<table class="tbl"><thead><tr><th class="l">Team</th><th>W</th><th>L</th><th>OTL</th><th>GF</th><th>GA</th></tr></thead><tbody>${table.map(([k, r]) => `<tr class="${favs().has(k) ? 'fav' : ''}"><td class="l"><a class="tlink" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a></td><td>${r.w}</td><td>${r.l}</td><td>${r.o}</td><td>${r.gf}</td><td>${r.ga}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No finished games yet.</p>'}</section></div>`;
+};
+
+// ------------------------------------------------------------------ traffic details (NBADash's hidden counter page)
+let trafficData = null;
+views.traffic = () => {
+  routeKeys = [];
+  bridge.request('traffic.get').then((t) => { const first = !trafficData; trafficData = t; if (first && parseRoute().view === 'traffic') render(); }).catch(() => {});
+  const t = trafficData;
+  if (!t) return '<div class="note">Loading...</div>';
+  const mb = (b) => (b / 1048576).toFixed(2) + ' MB';
+  const up = `${Math.floor(t.uptimeSec / 3600)}h ${Math.floor((t.uptimeSec % 3600) / 60)}m`;
+  const hosts = Object.entries(t.byHost || {});
+  return `<section class="card wide"><h2>Data traffic this session</h2><div class="kpis"><div><b>${t.requests}</b><small>requests</small></div><div><b>${mb(t.bytes)}</b><small>downloaded</small></div><div><b>${t.errors}</b><small>errors</small></div><div><b>${up}</b><small>open for</small></div></div>
+      <p class="muted small">Counted by NHLDash itself, the same numbers DashLauncher shows. Update checks to GitHub are not counted.</p></section>
+    <section class="card wide"><h2>By server</h2>${hosts.length ? `<table class="tbl"><thead><tr><th class="l">Server</th><th>Requests</th><th>Downloaded</th><th>Errors</th></tr></thead><tbody>${hosts.map(([h, v]) => `<tr><td class="l">${esc(h)}</td><td>${v.requests}</td><td>${mb(v.bytes)}</td><td>${v.errors}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing downloaded yet this session.</p>'}</section>
+    <section class="card wide"><h2>Last requests</h2>${(t.last || []).length ? `<div class="tscroll"><table class="tbl"><thead><tr><th class="l">Time</th><th class="l">What</th><th class="l">Server</th><th>Size</th><th>Time taken</th><th>Result</th></tr></thead><tbody>${t.last.map((r) => `<tr><td class="l">${esc(new Date(r.at).toLocaleTimeString())}</td><td class="l">${esc(r.key)}</td><td class="l">${esc(r.host)}</td><td>${(r.bytes / 1024).toFixed(1)} KB</td><td>${r.ms} ms</td><td>${r.ok ? 'OK' : '<span class="upd-err">failed</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">None yet.</p>'}</section>`;
+};
+
 // ------------------------------------------------------------------ updates (same window and steps as NBADash)
 const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
 const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
@@ -689,6 +796,8 @@ function parseRoute() {
   const h = location.hash || '#/';
   let m;
   if ((m = h.match(/^#\/game\/(\d{10})$/))) return { view: 'game', arg: m[1], tab: 'scores' };
+  if ((m = h.match(/^#\/week\/(\d{1,2})$/))) return { view: 'week', arg: m[1], tab: '' };
+  if (h === '#/traffic') return { view: 'traffic', tab: '' };
   if ((m = h.match(/^#\/player\/(\d{7,8})$/))) return { view: 'player', arg: m[1], tab: '' };
   if ((m = h.match(/^#\/team\/([A-Z]{3})$/))) return { view: 'team', arg: m[1], tab: '' };
   if ((m = h.match(/^#\/scores\/(\d{4}-\d{2}-\d{2})$/))) return { view: 'scores', arg: m[1], tab: 'scores' };
@@ -711,6 +820,7 @@ function render() {
   const y = window.scrollY;
   const focusId = document.activeElement?.id;
   renderBanner(r.view === 'team' ? r.arg : '');
+  renderWeekBar(r.view === 'week' ? Number(r.arg) : 0);
   $('view').innerHTML = views[r.view](r.arg);
   if (focusId && $(focusId) && focusId.startsWith('set-')) $(focusId).focus();
   window.scrollTo(0, y);
@@ -836,6 +946,7 @@ bridge.on('host.visible', () => {
     if (state.mode !== 'launcher') { bridge.setTheme(standaloneTheme); $('btn-theme').textContent = `Theme: ${standaloneTheme}`; }
     else if (state.theme) bridge.setTheme(state.theme);
     render();
+    loadSeason();
     const note = state.updateNote;
     if (note) alertNote(note.ok ? `Updated to NHLDash ${note.to}.` : `The update to ${note.to} did not start, so ${note.from} was restored. ${note.reason || ''}`);
     if (state.settings.updateCheck !== false && !note) setTimeout(() => checkUpdate(true), 4000);

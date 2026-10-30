@@ -28,6 +28,8 @@ $script:Visible = $false
 $script:Watch = @()
 $script:NextAuto = [datetime]::MaxValue
 $script:SyncKeys = $null
+$script:SyncTotal = 1
+$script:LastSyncPct = -1
 $script:Shared = $null
 $script:Queue = $null
 $script:Out = $null
@@ -35,6 +37,7 @@ $script:Worker = $null
 $script:WorkerHandle = $null
 
 $script:NhlApi = 'https://api-web.nhle.com/v1/'
+$script:NhlStats = 'https://api.nhle.com/stats/rest/en/'
 $script:LogoBase = 'https://assets.nhle.com/logos/nhl/svg/'
 $script:MoneyPuck = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/'
 
@@ -87,6 +90,20 @@ function Get-SeasonStartYear {
     if ($d.Month -ge 9) { return $d.Year } else { return $d.Year - 1 }
 }
 
+function Get-SeasonId { $y = Get-SeasonStartYear; return '{0}{1}' -f $y, ($y + 1) }
+function Get-SeasonWeeks {
+    <# Mondays from the week before the earliest possible opener up to this week (or the end of June). #>
+    $y = Get-SeasonStartYear
+    $d = (Get-Date -Year $y -Month 9 -Day 22).Date
+    while ($d.DayOfWeek -ne 'Monday') { $d = $d.AddDays(-1) }
+    $end = (Get-Date).Date
+    $stop = (Get-Date -Year ($y + 1) -Month 6 -Day 30).Date
+    if ($end -gt $stop) { $end = $stop }
+    $list = @()
+    while ($d -le $end) { $list += $d.ToString('yyyy-MM-dd'); $d = $d.AddDays(7) }
+    return , $list
+}
+
 function Resolve-DataKey {
     <# Turns a page key into a download spec, or $null if the key is not allowed. The page never supplies a URL. #>
     param([string]$Key)
@@ -100,6 +117,15 @@ function Resolve-DataKey {
     if ($k -cmatch '^team:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-stats/$($Matches[1])/now"; File = "team-$($Matches[1]).json"; Kind = 'json'; Ttl = 1800 } }
     if ($k -match '^player:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/landing"; File = "player-$($Matches[1]).json"; Kind = 'json'; Ttl = 3600 } }
     if ($k -match '^plog:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/game-log/now"; File = "plog-$($Matches[1]).json"; Kind = 'json'; Ttl = 900 } }
+    if ($k -match '^week:(\d{4}-\d{2}-\d{2})$') {
+        # One request per week (the NHL's schedule feed answers with 7 days). Finished weeks never change.
+        $d = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $ttl = if ($d.AddDays(8) -lt (Get-Date).Date) { 2592000 } else { 600 }
+        return @{ Key = $k; Url = $script:NhlApi + 'schedule/' + $Matches[1]; File = "week-$($Matches[1]).json"; Kind = 'json'; Ttl = $ttl }
+    }
+    if ($k -eq 'rookies') {
+        return @{ Key = $k; Url = $script:NhlStats + 'skater/summary?isAggregate=false&isGame=false&sort=%5B%7B%22property%22:%22points%22,%22direction%22:%22DESC%22%7D%5D&start=0&limit=100&cayenneExp=isRookie%3D%271%27%20and%20seasonId%3D' + (Get-SeasonId) + '%20and%20gameTypeId%3D2'; File = 'rookies.json'; Kind = 'json'; Ttl = 3600 }
+    }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }
@@ -208,10 +234,16 @@ $script:WorkerScript = {
         $item = $null
         if (-not $Queue.TryTake([ref]$item, 500)) { continue }
         try {
-            if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
+            if ($Shared.Halted -or $item.Gen -ne $Shared.Gen -or $Shared.Skip.ContainsKey($item.Key)) { continue }
             $Shared.Requests++
+            $hostName = ([uri]$item.Url).Host
+            if (-not $Shared.ByHost.ContainsKey($hostName)) { $Shared.ByHost[$hostName] = @{ requests = 0; bytes = [long]0; errors = 0 } }
+            $hs = $Shared.ByHost[$hostName]; $hs.requests++
+            $t0 = Get-Date
             $bytes = Get-Bytes $item.Url
-            $Shared.Bytes += $bytes.Length
+            $Shared.Bytes += $bytes.Length; $hs.bytes += $bytes.Length
+            [void]$Shared.Last.Insert(0, @{ at = $t0.ToString('o'); key = $item.Key; host = $hostName; bytes = $bytes.Length; ms = [int]((Get-Date) - $t0).TotalMilliseconds; ok = $true })
+            while ($Shared.Last.Count -gt 40) { $Shared.Last.RemoveAt(40) }
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
             $path = Join-Path $CacheDir $item.File
             $dir = Split-Path $path
@@ -244,6 +276,7 @@ $script:WorkerScript = {
         } catch {
             if ($item.Gen -eq $Shared.Gen -and -not $Shared.Halted) {
                 $Shared.Errors++
+                try { $hn = ([uri]$item.Url).Host; if ($Shared.ByHost.ContainsKey($hn)) { $Shared.ByHost[$hn].errors++ }; [void]$Shared.Last.Insert(0, @{ at = (Get-Date).ToString('o'); key = $item.Key; host = $hn; bytes = 0; ms = 0; ok = $false }) } catch { }
                 $msg = $_.Exception.Message
                 if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
                 $Shared.LastError = $msg
@@ -394,7 +427,8 @@ function Initialize-Dash {
     $script:Settings = Read-Settings
     $script:Shared = [hashtable]::Synchronized(@{
         Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null
-        Pending = [hashtable]::Synchronized(@{}); TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
+        Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{})
+        Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
     })
     $script:Queue = New-Object 'System.Collections.Concurrent.BlockingCollection[object]'
     $script:Out = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
@@ -472,6 +506,10 @@ function Invoke-DashCommand {
                     else { ReplyError $id 'Data traffic is paused.' }
                     return
                 }
+                if ([bool]$a.cacheOnly) {
+                    if ($null -ne (Get-CacheAge $spec.File)) { $script:Out.Enqueue((New-DataEvent $spec $true)); Reply $id '"cached"' } else { Reply $id '"missing"' }
+                    return
+                }
                 Start-WorkerRunspace
                 $r = Request-Data $spec ([bool]$a.force)
                 Reply $id (ConvertTo-Json $r)
@@ -503,6 +541,39 @@ function Invoke-DashCommand {
                 Save-Settings
                 Reset-AutoTimer
                 Reply $id (ConvertTo-PageJson (Get-Snapshot))
+            }
+            'season.weeks' {
+                $weeks = foreach ($w in (Get-SeasonWeeks)) { @{ monday = $w; cached = ($null -ne (Get-CacheAge "week-$w.json")) } }
+                Reply $id (ConvertTo-Json -InputObject @($weeks) -Compress)
+            }
+            'sync.run' {
+                if ($script:Shared.Halted) { ReplyError $id 'Data traffic is paused. Resume first.'; return }
+                if ($script:SyncKeys) { Reply $id 'false'; return }
+                Start-WorkerRunspace
+                $script:Shared.Skip.Clear()
+                $weeks = Get-SeasonWeeks
+                $keys = @()
+                for ($i = 0; $i -lt $weeks.Count; $i++) {
+                    $spec = Resolve-DataKey ('week:' + $weeks[$i])
+                    $r = Request-Data $spec ($i -eq $weeks.Count - 1)     # finished weeks come from the cache when saved
+                    if ($r -ne 'cached') { $keys += $spec.Key }
+                }
+                foreach ($k in @('standings', 'rookies')) { if ((Request-Data (Resolve-DataKey $k) $true) -ne 'cached') { $keys += $k } }
+                $script:SyncKeys = $keys
+                $script:SyncTotal = [Math]::Max(1, $keys.Count)
+                $script:LastSyncPct = -1
+                Reply $id (ConvertTo-Json @{ started = $true; requests = $keys.Count; weeks = $weeks.Count } -Compress)
+            }
+            'sync.cancel' {
+                if ($script:SyncKeys) { foreach ($k in $script:SyncKeys) { $script:Shared.Skip[$k] = $true } }
+                Reply $id 'true'
+            }
+            'traffic.get' {
+                $s = $script:Shared
+                $hosts = @{}
+                foreach ($h in @($s.ByHost.Keys)) { $hosts[$h] = $s.ByHost[$h] }
+                $obj = @{ uptimeSec = [int]((Get-Date) - $s.Started).TotalSeconds; requests = [int]$s.Requests; bytes = [long]$s.Bytes; errors = [int]$s.Errors; byHost = $hosts; last = @($s.Last.ToArray()) }
+                Reply $id (ConvertTo-Json -InputObject $obj -Depth 5 -Compress)
             }
             'cache.clear' {
                 Get-ChildItem -LiteralPath $script:CacheDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(json|csv)$' } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -538,6 +609,12 @@ function Receive-DashEvents {
     }
     $out = New-Object System.Collections.Generic.List[string]
     foreach ($u in @(Get-UpdateEvents)) { if ($u) { $out.Add($u) } }
+    if ($script:SyncKeys) {
+        $left = @($script:SyncKeys | Where-Object { $script:Shared.Pending.ContainsKey($_) }).Count
+        $pct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal)
+        if ($left -eq 0) { $script:SyncKeys = $null; $out.Add('{"event":"sync","data":{"running":false,"pct":100}}') }
+        elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0}}}}}' -f $pct)) }
+    }
     $msg = $null
     while ($out.Count -lt 25 -and $script:Out.TryDequeue([ref]$msg)) { $out.Add($msg) }
     return $out.ToArray()
@@ -548,14 +625,15 @@ function Get-DashStatus {
     $s = $script:Shared
     if (-not $s) { return @{ Live = 0; Syncing = $false; SyncPct = $null; UpdateAvailable = $null; Error = $null; Traffic = @{ Requests = 0; Bytes = 0; Errors = 0 } } }
     $syncing = $false
+    $syncPct = $null
     if ($script:SyncKeys) {
         $left = @($script:SyncKeys | Where-Object { $s.Pending.ContainsKey($_) }).Count
-        if ($left -eq 0) { $script:SyncKeys = $null } else { $syncing = $true }
+        if ($left -gt 0) { $syncing = $true; $syncPct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal) }
     }
     return @{
         Live            = $(if ($s.Halted) { 0 } else { [int]$s.Live })
         Syncing         = $syncing
-        SyncPct         = $null
+        SyncPct         = $syncPct
         UpdateAvailable = $script:UpdateAvailable
         Error           = $(if ($s.Halted) { $null } else { $s.LastError })
         Traffic         = @{ Requests = [int]$s.Requests; Bytes = [long]$s.Bytes; Errors = [int]$s.Errors }
@@ -568,6 +646,7 @@ function Stop-DashTraffic {
     $script:Shared.Halted = $true
     $script:Shared.Gen++
     Clear-Queue
+    if ($script:SyncKeys) { $script:Out.Enqueue('{"event":"sync","data":{"running":false,"pct":0,"cancelled":true}}') }
     $script:SyncKeys = $null
     $script:NextAuto = [datetime]::MaxValue
     Send-Page '{"event":"traffic","data":{"stopped":true}}'
@@ -598,6 +677,8 @@ function Invoke-DashSync {
     $keys = @('score:' + (Get-Date).ToString('yyyy-MM-dd'), 'standings')
     foreach ($k in $keys) { [void](Request-Data (Resolve-DataKey $k) $true) }
     $script:SyncKeys = $keys
+    $script:SyncTotal = $keys.Count
+    $script:LastSyncPct = -1
     return $true
 }
 
