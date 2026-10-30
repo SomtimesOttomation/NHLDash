@@ -28,6 +28,8 @@ $script:Visible = $false
 $script:Watch = @()
 $script:NextAuto = [datetime]::MaxValue
 $script:SyncKeys = $null
+$script:SyncTotal = 1
+$script:LastSyncPct = -1
 $script:Shared = $null
 $script:Queue = $null
 $script:Out = $null
@@ -35,11 +37,13 @@ $script:Worker = $null
 $script:WorkerHandle = $null
 
 $script:NhlApi = 'https://api-web.nhle.com/v1/'
+$script:NhlStats = 'https://api.nhle.com/stats/rest/en/'
+$script:Espn = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/'
 $script:LogoBase = 'https://assets.nhle.com/logos/nhl/svg/'
 $script:MoneyPuck = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/'
 
 function New-DefaultSettings {
-    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favorites = @() }
+    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favorites = @(); updateCheck = $true }
 }
 
 # ---------------------------------------------------------------- page messages
@@ -61,6 +65,7 @@ function Read-Settings {
         }
     } catch { }
     $s.autoRefresh = [bool]$s.autoRefresh; $s.autoAck = [bool]$s.autoAck
+    $s.updateCheck = [bool]$s.updateCheck
     $s.moneypuck = [bool]$s.moneypuck; $s.mpAck = [bool]$s.mpAck
     $s.refreshSeconds = Limit-Seconds $s.refreshSeconds
     $old = $null; try { if (Test-Path $script:SettingsFile) { $old = ([IO.File]::ReadAllText($script:SettingsFile) | ConvertFrom-Json).favTeam } } catch { }
@@ -86,6 +91,20 @@ function Get-SeasonStartYear {
     if ($d.Month -ge 9) { return $d.Year } else { return $d.Year - 1 }
 }
 
+function Get-SeasonId { $y = Get-SeasonStartYear; return '{0}{1}' -f $y, ($y + 1) }
+function Get-SeasonWeeks {
+    <# Mondays from the week before the earliest possible opener up to this week (or the end of June). #>
+    $y = Get-SeasonStartYear
+    $d = (Get-Date -Year $y -Month 9 -Day 22).Date
+    while ($d.DayOfWeek -ne 'Monday') { $d = $d.AddDays(-1) }
+    $end = (Get-Date).Date
+    $stop = (Get-Date -Year ($y + 1) -Month 6 -Day 30).Date
+    if ($end -gt $stop) { $end = $stop }
+    $list = @()
+    while ($d -le $end) { $list += $d.ToString('yyyy-MM-dd'); $d = $d.AddDays(7) }
+    return , $list
+}
+
 function Resolve-DataKey {
     <# Turns a page key into a download spec, or $null if the key is not allowed. The page never supplies a URL. #>
     param([string]$Key)
@@ -97,6 +116,19 @@ function Resolve-DataKey {
     }
     if ($k -cmatch '^sched:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-schedule-season/$($Matches[1])/now"; File = "sched-$($Matches[1]).json"; Kind = 'json'; Ttl = 600 } }
     if ($k -cmatch '^team:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-stats/$($Matches[1])/now"; File = "team-$($Matches[1]).json"; Kind = 'json'; Ttl = 1800 } }
+    if ($k -match '^player:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/landing"; File = "player-$($Matches[1]).json"; Kind = 'json'; Ttl = 3600 } }
+    if ($k -match '^plog:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/game-log/now"; File = "plog-$($Matches[1]).json"; Kind = 'json'; Ttl = 900 } }
+    if ($k -match '^week:(\d{4}-\d{2}-\d{2})$') {
+        # One request per week (the NHL's schedule feed answers with 7 days). Finished weeks never change.
+        $d = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $ttl = if ($d.AddDays(8) -lt (Get-Date).Date) { 2592000 } else { 600 }
+        return @{ Key = $k; Url = $script:NhlApi + 'schedule/' + $Matches[1]; File = "week-$($Matches[1]).json"; Kind = 'json'; Ttl = $ttl }
+    }
+    if ($k -eq 'rookies') {
+        return @{ Key = $k; Url = $script:NhlStats + 'skater/summary?isAggregate=false&isGame=false&sort=%5B%7B%22property%22:%22points%22,%22direction%22:%22DESC%22%7D%5D&start=0&limit=100&cayenneExp=isRookie%3D%271%27%20and%20seasonId%3D' + (Get-SeasonId) + '%20and%20gameTypeId%3D2'; File = 'rookies.json'; Kind = 'json'; Ttl = 3600 }
+    }
+    if ($k -eq 'espn:injuries') { return @{ Key = $k; Url = $script:Espn + 'injuries'; File = 'espn-injuries.json'; Kind = 'json'; Ttl = 1800 } }
+    if ($k -eq 'espn:transactions') { return @{ Key = $k; Url = $script:Espn + 'transactions?limit=1000'; File = 'espn-transactions.json'; Kind = 'json'; Ttl = 1800 } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }
@@ -205,10 +237,16 @@ $script:WorkerScript = {
         $item = $null
         if (-not $Queue.TryTake([ref]$item, 500)) { continue }
         try {
-            if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
+            if ($Shared.Halted -or $item.Gen -ne $Shared.Gen -or $Shared.Skip.ContainsKey($item.Key)) { continue }
             $Shared.Requests++
+            $hostName = ([uri]$item.Url).Host
+            if (-not $Shared.ByHost.ContainsKey($hostName)) { $Shared.ByHost[$hostName] = @{ requests = 0; bytes = [long]0; errors = 0 } }
+            $hs = $Shared.ByHost[$hostName]; $hs.requests++
+            $t0 = Get-Date
             $bytes = Get-Bytes $item.Url
-            $Shared.Bytes += $bytes.Length
+            $Shared.Bytes += $bytes.Length; $hs.bytes += $bytes.Length
+            [void]$Shared.Last.Insert(0, @{ at = $t0.ToString('o'); key = $item.Key; host = $hostName; bytes = $bytes.Length; ms = [int]((Get-Date) - $t0).TotalMilliseconds; ok = $true })
+            while ($Shared.Last.Count -gt 40) { $Shared.Last.RemoveAt(40) }
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
             $path = Join-Path $CacheDir $item.File
             $dir = Split-Path $path
@@ -241,6 +279,7 @@ $script:WorkerScript = {
         } catch {
             if ($item.Gen -eq $Shared.Gen -and -not $Shared.Halted) {
                 $Shared.Errors++
+                try { $hn = ([uri]$item.Url).Host; if ($Shared.ByHost.ContainsKey($hn)) { $Shared.ByHost[$hn].errors++ }; [void]$Shared.Last.Insert(0, @{ at = (Get-Date).ToString('o'); key = $item.Key; host = $hn; bytes = 0; ms = 0; ok = $false }) } catch { }
                 $msg = $_.Exception.Message
                 if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
                 $Shared.LastError = $msg
@@ -286,6 +325,72 @@ function Reset-AutoTimer {
     } else { $script:NextAuto = [datetime]::MaxValue }
 }
 
+# ---------------------------------------------------------------- updater (child process, ported from NBADash)
+$script:UpdDir = ''
+$script:UpdProc = $null
+$script:UpdAction = ''
+$script:LastUpdJson = ''
+$script:UpdateAvailable = $null
+$script:UpdateNote = $null
+$script:UpdOut = ''
+$script:UpdEvents = $null
+
+function Get-ChildProgress {
+    # Reads a child's console output: the last ##PROGRESS marker.
+    param([string]$Path)
+    $r = @{ pct = 0; text = '' }
+    try {
+        $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        $sr = New-Object IO.StreamReader($fs)
+        while (($l = $sr.ReadLine()) -ne $null) {
+            if ($l.Trim() -match '^##PROGRESS (\d+)\|(.*)$') { $r.pct = [int]$Matches[1]; $r.text = $Matches[2] }
+        }
+        $sr.Close(); $fs.Close()
+    } catch { }
+    return $r
+}
+function Read-UpdateJson {
+    param([string]$Name)
+    $p = Join-Path $script:UpdDir $Name
+    if (Test-Path $p) { try { return ([IO.File]::ReadAllText($p) | ConvertFrom-Json) } catch { } }
+    return $null
+}
+function Start-Updater {
+    <# Update checks talk to GitHub only, so the pause switch leaves them alone. #>
+    param([string]$Action)
+    if ($script:UpdProc -and -not $script:UpdProc.HasExited) { return $false }
+    $cur = if ($env:NHLDASH_FAKE_VERSION) { $env:NHLDASH_FAKE_VERSION } else { $script:Version }     # test hook: pretend to be older
+    Remove-Item (Join-Path $script:UpdDir 'update-result.json') -Force -ErrorAction SilentlyContinue
+    $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $script:Root 'Update-NHLDash.ps1')),
+                  '-Action', $Action, '-CurrentVersion', $cur, '-WorkDir', ('"{0}"' -f $script:UpdDir))
+    if ($env:NHLDASH_UPDATE_API) { $argsList += '-ApiBase'; $argsList += $env:NHLDASH_UPDATE_API }   # test hook
+    $exe = if ($env:NHLDASH_PS) { $env:NHLDASH_PS } else { 'powershell.exe' }                         # test hook
+    $script:UpdAction = $Action
+    $sp = @{ FilePath = $exe; ArgumentList = $argsList; PassThru = $true; RedirectStandardOutput = $script:UpdOut }
+    if ($IsWindows -ne $false) { $sp.WindowStyle = 'Hidden' }       # $IsWindows is $null in Windows PowerShell 5.1
+    $script:UpdProc = Start-Process @sp
+    $script:LastUpdJson = ''
+    $script:Out.Enqueue((ConvertTo-PageJson @{ event = 'update'; data = @{ running = $true; action = $Action; pct = 0; text = 'Starting...' } }))
+    return $true
+}
+function Get-UpdateEvents {
+    $list = @()
+    if (-not $script:UpdProc) { return $list }
+    if ($script:UpdProc.HasExited) {
+        $res = Read-UpdateJson 'update-result.json'
+        if (-not $res) { $res = [pscustomobject]@{ status = 'error'; error = 'The update check ended without an answer.' } }
+        $script:UpdProc = $null
+        if ([string]$res.status -eq 'available' -or [string]$res.status -eq 'staged') { $script:UpdateAvailable = [string]$res.latest }
+        elseif ([string]$res.status -eq 'current') { $script:UpdateAvailable = $null }
+        $list += (ConvertTo-Json -InputObject @{ event = 'update'; data = @{ running = $false; action = $script:UpdAction; result = $res } } -Depth 6 -Compress)
+    } else {
+        $prog = Get-ChildProgress $script:UpdOut
+        $json = ConvertTo-PageJson @{ event = 'update'; data = @{ running = $true; action = $script:UpdAction; pct = $prog.pct; text = $prog.text } }
+        if ($json -ne $script:LastUpdJson) { $script:LastUpdJson = $json; $list += $json }
+    }
+    return $list
+}
+
 # ---------------------------------------------------------------- contract functions
 function Initialize-Dash {
     <# Takes the host lock, loads settings and makes folders. Fetches nothing. #>
@@ -309,10 +414,24 @@ function Initialize-Dash {
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
     }
     $script:SettingsFile = Join-Path $roam 'settings.json'
+    $script:UpdDir = Join-Path $local 'update'
+    if (-not (Test-Path $script:UpdDir)) { New-Item -ItemType Directory -Path $script:UpdDir -Force | Out-Null }
+    $script:UpdOut = Join-Path $script:UpdDir 'update.out'
+    # After an update the helper leaves a "pending" note: report the result once; the page load confirms it worked.
+    $script:UpdateNote = $null
+    $pend = Read-UpdateJson 'update-pending.json'
+    if ($pend -and [string]$pend.to -eq $script:Version) { $script:UpdateNote = @{ ok = $true; from = [string]$pend.from; to = [string]$pend.to } }
+    $failed = Read-UpdateJson 'update-failed.json'
+    if ($failed) {
+        $script:UpdateNote = @{ ok = $false; from = [string]$failed.from; to = [string]$failed.to; reason = [string]$failed.reason }
+        Remove-Item (Join-Path $script:UpdDir 'update-failed.json') -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+    }
     $script:Settings = Read-Settings
     $script:Shared = [hashtable]::Synchronized(@{
         Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null
-        Pending = [hashtable]::Synchronized(@{}); TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
+        Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{})
+        Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
     })
     $script:Queue = New-Object 'System.Collections.Concurrent.BlockingCollection[object]'
     $script:Out = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
@@ -343,7 +462,43 @@ function Invoke-DashCommand {
     $a = $Message.args
     try {
         switch ([string]$Message.cmd) {
-            'init' { Reply $id (ConvertTo-PageJson (Get-Snapshot)) }
+            'init' {
+                $snap = Get-Snapshot
+                $snap.updateNote = $script:UpdateNote
+                Reply $id (ConvertTo-PageJson $snap)
+                if ($script:UpdateNote -and $script:UpdateNote.ok) {
+                    # the page loaded: tell the update helper the new version works
+                    try { [IO.File]::WriteAllText((Join-Path $script:UpdDir 'update-ok.json'), '{"ok":true}') } catch { }
+                    Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+                }
+                $script:UpdateNote = $null
+            }
+            'update.check' { Reply $id ((Start-Updater 'Check').ToString().ToLower()) }
+            'update.stage' { Reply $id ((Start-Updater 'Stage').ToString().ToLower()) }
+            'update.cancel' {
+                try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
+                Reply $id 'true'
+            }
+            'update.apply' {
+                $st = Read-UpdateJson 'staged.json'
+                $stage = Join-Path $script:UpdDir 'stage'
+                if (-not $st -or -not (Test-Path (Join-Path $stage 'Start-NHLDash.ps1'))) { ReplyError $id 'There is no downloaded update to install. Download it again.'; return }
+                # run the helper from a copy so replacing the app files cannot touch the running helper
+                $runDir = Join-Path $script:UpdDir 'run'
+                if (-not (Test-Path $runDir)) { New-Item -ItemType Directory -Path $runDir -Force | Out-Null }
+                $helper = Join-Path $runDir 'Apply-Update.ps1'
+                Copy-Item (Join-Path $script:Root 'Apply-Update.ps1') $helper -Force
+                # Context.Relaunch is passed through exactly as given (it may include arguments, e.g. -Open nhldash)
+                $relaunch = if ($script:Ctx.Relaunch) { [string]$script:Ctx.Relaunch } else { '"' + (Join-Path $script:Root 'Start-NHLDash.bat') + '"' }
+                $relaunchB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($relaunch))
+                $hostPid = if ($script:Ctx.HostPid) { [int]$script:Ctx.HostPid } else { $PID }
+                $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $helper), '-AppDir', ('"{0}"' -f $script:Root), '-StageDir', ('"{0}"' -f $stage),
+                       '-WorkDir', ('"{0}"' -f $script:UpdDir), '-ParentPid', [string]$hostPid, '-RelaunchB64', $relaunchB64,
+                       '-OldVersion', $script:Version, '-NewVersion', [string]$st.version)
+                Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
+                Reply $id 'true'
+                if ($script:Ctx.Close) { & $script:Ctx.Close }
+            }
             'data.get' {
                 $spec = Resolve-DataKey ([string]$a.key)
                 if (-not $spec) { ReplyError $id 'unknown data key'; return }
@@ -352,6 +507,10 @@ function Invoke-DashCommand {
                     # Paused: cached copies still show, nothing is downloaded.
                     if ($null -ne (Get-CacheAge $spec.File)) { $script:Out.Enqueue((New-DataEvent $spec $true)); Reply $id '"cached"' }
                     else { ReplyError $id 'Data traffic is paused.' }
+                    return
+                }
+                if ([bool]$a.cacheOnly) {
+                    if ($null -ne (Get-CacheAge $spec.File)) { $script:Out.Enqueue((New-DataEvent $spec $true)); Reply $id '"cached"' } else { Reply $id '"missing"' }
                     return
                 }
                 Start-WorkerRunspace
@@ -379,11 +538,45 @@ function Invoke-DashCommand {
                         $s.moneypuck = $on; if ($on) { $s.mpAck = $true }
                     }
                     'favorites' { $s.favorites = Limit-Teams $a.value }
+                    'updateCheck' { $s.updateCheck = [bool]$a.value }
                     default { ReplyError $id 'unknown setting'; return }
                 }
                 Save-Settings
                 Reset-AutoTimer
                 Reply $id (ConvertTo-PageJson (Get-Snapshot))
+            }
+            'season.weeks' {
+                $weeks = foreach ($w in (Get-SeasonWeeks)) { @{ monday = $w; cached = ($null -ne (Get-CacheAge "week-$w.json")) } }
+                Reply $id (ConvertTo-Json -InputObject @($weeks) -Compress)
+            }
+            'sync.run' {
+                if ($script:Shared.Halted) { ReplyError $id 'Data traffic is paused. Resume first.'; return }
+                if ($script:SyncKeys) { Reply $id 'false'; return }
+                Start-WorkerRunspace
+                $script:Shared.Skip.Clear()
+                $weeks = Get-SeasonWeeks
+                $keys = @()
+                for ($i = 0; $i -lt $weeks.Count; $i++) {
+                    $spec = Resolve-DataKey ('week:' + $weeks[$i])
+                    $r = Request-Data $spec ($i -eq $weeks.Count - 1)     # finished weeks come from the cache when saved
+                    if ($r -ne 'cached') { $keys += $spec.Key }
+                }
+                foreach ($k in @('standings', 'rookies')) { if ((Request-Data (Resolve-DataKey $k) $true) -ne 'cached') { $keys += $k } }
+                $script:SyncKeys = $keys
+                $script:SyncTotal = [Math]::Max(1, $keys.Count)
+                $script:LastSyncPct = -1
+                Reply $id (ConvertTo-Json @{ started = $true; requests = $keys.Count; weeks = $weeks.Count } -Compress)
+            }
+            'sync.cancel' {
+                if ($script:SyncKeys) { foreach ($k in $script:SyncKeys) { $script:Shared.Skip[$k] = $true } }
+                Reply $id 'true'
+            }
+            'traffic.get' {
+                $s = $script:Shared
+                $hosts = @{}
+                foreach ($h in @($s.ByHost.Keys)) { $hosts[$h] = $s.ByHost[$h] }
+                $obj = @{ uptimeSec = [int]((Get-Date) - $s.Started).TotalSeconds; requests = [int]$s.Requests; bytes = [long]$s.Bytes; errors = [int]$s.Errors; byHost = $hosts; last = @($s.Last.ToArray()) }
+                Reply $id (ConvertTo-Json -InputObject $obj -Depth 5 -Compress)
             }
             'cache.clear' {
                 Get-ChildItem -LiteralPath $script:CacheDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(json|csv)$' } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -418,6 +611,13 @@ function Receive-DashEvents {
         Reset-AutoTimer
     }
     $out = New-Object System.Collections.Generic.List[string]
+    foreach ($u in @(Get-UpdateEvents)) { if ($u) { $out.Add($u) } }
+    if ($script:SyncKeys) {
+        $left = @($script:SyncKeys | Where-Object { $script:Shared.Pending.ContainsKey($_) }).Count
+        $pct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal)
+        if ($left -eq 0) { $script:SyncKeys = $null; $out.Add('{"event":"sync","data":{"running":false,"pct":100}}') }
+        elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0}}}}}' -f $pct)) }
+    }
     $msg = $null
     while ($out.Count -lt 25 -and $script:Out.TryDequeue([ref]$msg)) { $out.Add($msg) }
     return $out.ToArray()
@@ -428,15 +628,16 @@ function Get-DashStatus {
     $s = $script:Shared
     if (-not $s) { return @{ Live = 0; Syncing = $false; SyncPct = $null; UpdateAvailable = $null; Error = $null; Traffic = @{ Requests = 0; Bytes = 0; Errors = 0 } } }
     $syncing = $false
+    $syncPct = $null
     if ($script:SyncKeys) {
         $left = @($script:SyncKeys | Where-Object { $s.Pending.ContainsKey($_) }).Count
-        if ($left -eq 0) { $script:SyncKeys = $null } else { $syncing = $true }
+        if ($left -gt 0) { $syncing = $true; $syncPct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal) }
     }
     return @{
         Live            = $(if ($s.Halted) { 0 } else { [int]$s.Live })
         Syncing         = $syncing
-        SyncPct         = $null
-        UpdateAvailable = $null
+        SyncPct         = $syncPct
+        UpdateAvailable = $script:UpdateAvailable
         Error           = $(if ($s.Halted) { $null } else { $s.LastError })
         Traffic         = @{ Requests = [int]$s.Requests; Bytes = [long]$s.Bytes; Errors = [int]$s.Errors }
     }
@@ -448,6 +649,7 @@ function Stop-DashTraffic {
     $script:Shared.Halted = $true
     $script:Shared.Gen++
     Clear-Queue
+    if ($script:SyncKeys) { $script:Out.Enqueue('{"event":"sync","data":{"running":false,"pct":0,"cancelled":true}}') }
     $script:SyncKeys = $null
     $script:NextAuto = [datetime]::MaxValue
     Send-Page '{"event":"traffic","data":{"stopped":true}}'
@@ -478,6 +680,8 @@ function Invoke-DashSync {
     $keys = @('score:' + (Get-Date).ToString('yyyy-MM-dd'), 'standings')
     foreach ($k in $keys) { [void](Request-Data (Resolve-DataKey $k) $true) }
     $script:SyncKeys = $keys
+    $script:SyncTotal = $keys.Count
+    $script:LastSyncPct = -1
     return $true
 }
 

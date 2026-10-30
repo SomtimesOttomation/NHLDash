@@ -16,12 +16,16 @@
       <a href="#/" data-tab="scores">Scores</a>
       <a href="#/standings" data-tab="standings">Standings</a>
       <a href="#/leaders" data-tab="leaders">Leaders</a>
+      <a href="#/rankings" data-tab="rankings">Rankings</a>
+      <a href="#/rookies" data-tab="rookies">Rookies</a>
+      <a href="#/transactions" data-tab="moves">Moves</a>
       <a href="#/advanced" data-tab="advanced">Advanced</a>
     </nav>
-    <span id="version" class="chip version"></span>
+    <button id="btn-version" class="ver-btn" type="button" hidden title="Check for updates"></button>
     <button id="btn-theme" class="icon-btn" type="button" hidden>Theme</button>
   </header>
   <nav id="banner" class="banner" aria-label="Teams"></nav>
+  <nav id="weekbar" class="weekbar" aria-label="Season weeks"></nav>
 
   <!-- Shared navigation bar: same order, look and keys in every dash (docs/NAVBAR-SPEC.md). -->
   <div class="navpill-row">
@@ -55,6 +59,9 @@
       <div class="actions"><button id="dialog-ok" class="btn primary" type="button">I understand, turn it on</button><button id="dialog-cancel" class="btn" type="button">Cancel</button></div>
     </div>
   </div>
+
+  <div id="cmpbar" class="cmpbar" hidden></div>
+  <div id="upd" class="dialog" hidden role="dialog" aria-modal="true" aria-label="Updates"><div class="dialog-box upd" id="upd-box"></div></div>
 
   <p class="foot muted small">Unofficial. Not affiliated with the NHL or any data provider. Data is fetched on this computer when you ask for it.</p>
   <script type="module" src="app.js"></script>

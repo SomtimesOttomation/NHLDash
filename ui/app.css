@@ -250,3 +250,82 @@ input[type=number] { width: 80px; }
 a.tlink { color: inherit; text-decoration: none; }
 a.tlink:hover { text-decoration: underline; }
 .favchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: var(--surface2); color: var(--text); text-decoration: none; margin: 2px; }
+
+/* Version button and update window (same as NBADash) */
+.ver-btn { margin-left: auto; font-size: 12px; color: var(--muted); padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent; position: relative; }
+.ver-btn:hover { background: var(--surface2); color: var(--text); }
+.ver-btn.has-update { color: var(--text); border-color: var(--accent2); }
+.ver-btn.has-update::after { content: ""; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent2); }
+.upd { min-width: 380px; }
+.upd-notes { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface2); max-height: 260px; overflow: auto; font-size: 13px; line-height: 1.5; }
+.upd-h { font-weight: 700; margin-top: 6px; }
+.upd-li { padding-left: 14px; position: relative; }
+.upd-li::before { content: "\2022"; position: absolute; left: 3px; }
+.upd-err { color: var(--warn); }
+.actions.end { justify-content: flex-end; }
+.pbar { height: 8px; border-radius: 999px; background: var(--surface2); overflow: hidden; margin-top: 8px; }
+.pbar i { display: block; height: 100%; background: var(--accent2); transition: width .25s; }
+
+/* Player page */
+a.plink { color: inherit; text-decoration: none; }
+a.plink:hover { text-decoration: underline; color: var(--accent2); }
+.bio { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; }
+.bio div { display: flex; flex-direction: column; }
+.bio small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); }
+h3.sub { font-size: 13.5px; margin: 14px 0 6px; }
+.tbl tr.tot td { font-weight: 700; border-top: 2px solid var(--line); }
+
+/* Week bar (same as NBADash) */
+.weekbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 0 22px 10px; justify-content: center; }
+.weekbar-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-right: 6px; }
+.weeklink { padding: 3px 9px; border-radius: 7px; font-size: 12.5px; color: var(--muted); text-decoration: none; font-weight: 600; }
+.weeklink:hover { background: var(--surface2); color: var(--text); }
+.weeklink.active { background: var(--accent2); color: var(--on-accent2); }
+.small-btn { padding: 3px 10px; font-size: 12px; margin-right: 6px; }
+.sline .b { font-weight: 700; }
+
+/* League pages */
+td.up { color: #16a34a; font-weight: 700; } td.down { color: var(--live); font-weight: 700; }
+.hint { border-bottom: 1px dotted var(--muted); cursor: help; }
+.btn.push { margin-left: auto; }
+.cmpbtn { margin-left: auto; align-self: flex-start; }
+.thead .cmpbtn + .star.big { margin-left: 6px; }
+.cmpbar { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.cmpbar[hidden] { display: none; }
+.xbtn { border: 0; background: none; color: var(--muted); font-size: 13px; padding: 0 2px; }
+.xbtn:hover { color: var(--text); }
+.card.cmp { max-width: 760px; margin: 14px auto; }
+.cmphead { display: flex; align-items: center; justify-content: space-around; gap: 16px; margin-bottom: 12px; }
+.cmphead a { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text); text-decoration: none; }
+.cmphead .blogo { width: 64px; height: 64px; object-fit: contain; }
+.cmprow { display: grid; grid-template-columns: 80px 1fr 80px; align-items: center; gap: 12px; padding: 5px 0; font-variant-numeric: tabular-nums; }
+.cmprow > span:first-child { text-align: right; } .cmprow .b { font-weight: 700; }
+.cmpmid small { display: block; text-align: center; color: var(--muted); font-size: 11.5px; }
+.cmpbars { display: flex; gap: 2px; height: 8px; }
+.cmpbars i { display: block; height: 100%; background: var(--line); border-radius: 3px; }
+.cmpbars i:first-child { margin-left: auto; } .cmpbars i.win { background: var(--accent2); }
+.cmpbars { justify-content: center; }
+
+/* Moves */
+a.seg { text-decoration: none; color: var(--text); }
+a.seg.on { color: var(--on-accent2); }
+.filters { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.filters input[type=search] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 260px; }
+.txrow { display: flex; align-items: flex-start; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--line); }
+.txrow .tag { white-space: nowrap; }
+.txrow.fav { background: color-mix(in srgb, var(--accent2) 7%, transparent); }
+.txd { flex: 1; }
+.tbl td.wrap { white-space: normal; min-width: 260px; text-align: left; }
+
+/* Game flow */
+.flow { width: 100%; height: auto; display: block; margin: 6px 0; }
+.flow .pline { stroke: var(--line); stroke-dasharray: 3 3; }
+.flow .plabel { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.flow path { fill: none; stroke-width: 2.4; stroke-linejoin: round; }
+.flow .fa { stroke: #f59e0b; } .flow .fh { stroke: var(--accent2); }
+.flow .ga { fill: #f59e0b; stroke: var(--surface); stroke-width: 2; } .flow .gh { fill: var(--accent2); stroke: var(--surface); stroke-width: 2; }
+/* Hover cards */
+.tipcard { position: absolute; z-index: 80; width: 320px; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.45; pointer-events: none; text-align: left; white-space: normal; }
+.tipcard b { display: block; margin-bottom: 3px; }
+.tipcard[hidden] { display: none; }
