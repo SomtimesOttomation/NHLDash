@@ -6,6 +6,11 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.4.1 (2026-10-29)
+
+**Redesign**
+- Logos, game cards and the week bar now match NBADash's sizes and layout.
+
 ## 0.4.0 (2026-10-29)
 
 **Feature**
