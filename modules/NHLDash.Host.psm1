@@ -98,6 +98,8 @@ function Resolve-DataKey {
     }
     if ($k -cmatch '^sched:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-schedule-season/$($Matches[1])/now"; File = "sched-$($Matches[1]).json"; Kind = 'json'; Ttl = 600 } }
     if ($k -cmatch '^team:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-stats/$($Matches[1])/now"; File = "team-$($Matches[1]).json"; Kind = 'json'; Ttl = 1800 } }
+    if ($k -match '^player:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/landing"; File = "player-$($Matches[1]).json"; Kind = 'json'; Ttl = 3600 } }
+    if ($k -match '^plog:(\d{7,8})$') { return @{ Key = $k; Url = $script:NhlApi + "player/$($Matches[1])/game-log/now"; File = "plog-$($Matches[1]).json"; Kind = 'json'; Ttl = 900 } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }

@@ -265,3 +265,13 @@ a.tlink:hover { text-decoration: underline; }
 .actions.end { justify-content: flex-end; }
 .pbar { height: 8px; border-radius: 999px; background: var(--surface2); overflow: hidden; margin-top: 8px; }
 .pbar i { display: block; height: 100%; background: var(--accent2); transition: width .25s; }
+
+/* Player page */
+a.plink { color: inherit; text-decoration: none; }
+a.plink:hover { text-decoration: underline; color: var(--accent2); }
+.bio { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; }
+.bio div { display: flex; flex-direction: column; }
+.bio small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); }
+h3.sub { font-size: 13.5px; margin: 14px 0 6px; }
+.tbl tr.tot td { font-weight: 700; border-top: 2px solid var(--line); }
