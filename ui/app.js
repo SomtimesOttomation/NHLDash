@@ -925,7 +925,7 @@ document.addEventListener('input', (e) => { if (e.target.id === 'tx-q') { txFilt
 function injuryList() {
   const d = get('espn:injuries');
   const out = [];
-  for (const t of d?.injuries || []) { const k = byName(t.displayName); for (const i of t.injuries || []) out.push({ k, name: i.athlete?.displayName, pos: i.athlete?.position, status: i.status, date: i.date, comment: i.shortComment, part: i.details?.type, back: i.details?.returnDate }); }
+  for (const t of d?.injuries || []) { const k = byName(t.displayName); for (const i of t.injuries || []) out.push({ k, name: i.athlete?.displayName, pos: i.athlete?.position, status: i.status, date: i.date, comment: (i.shortComment || '').length > 8 ? i.shortComment : '', part: i.details?.type, back: i.details?.returnDate }); }
   return out;
 }
 const injTable = (list, showTeam) => `<div class="tscroll"><table class="tbl"><thead><tr>${showTeam ? '<th class="l">Team</th>' : ''}<th class="l">Player</th><th>Pos</th><th class="l">Status</th><th class="l">Injury</th><th>Expected back</th><th class="l">Note</th></tr></thead><tbody>

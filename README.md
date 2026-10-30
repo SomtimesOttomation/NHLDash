@@ -3,13 +3,17 @@
 NHL 2026-27 dashboard for [DashLauncher](https://github.com/SomtimesOttomation/DashLauncher). Runs on its own or as a tab in
 DashLauncher. Windows PowerShell 5.1 + WebView2, no installer, no admin rights, no build step.
 
-Team banner with favourites and team pages (schedule, results, player stats). Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
+Team banner with favourites; team, player and week pages; scores (any date) with a game flow chart and shot map;
+standings, leaders, power rankings, rookie watch, East-West report, compare; transactions, injuries and free agents;
+an updater (version button) and a traffic page. Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
 league), skater and goalie leaders. Optional advanced stats (xG, shot quality, goalie GSAx) from MoneyPuck.
 
 ## Data sources
 
 - **NHL web API** (`api-web.nhle.com`): the NHL's own unofficial, undocumented feed. All URLs live in
   `modules/NHLDash.Host.psm1` > `Resolve-DataKey`, so a change on the NHL side is fixed in one place.
+- **NHL stats API** (`api.nhle.com`): the rookie list.
+- **ESPN** public NHL endpoints: injuries and transactions only, downloaded when those pages are opened.
 - **MoneyPuck** (`moneypuck.com/data.htm`): off by default. When turned on (with a warning), the Advanced page downloads
   the published season files, at most every 12 hours, credited on screen. Free for personal, non-commercial use only.
 
