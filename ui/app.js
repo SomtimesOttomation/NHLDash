@@ -131,11 +131,14 @@ views.scores = (date) => {
     const live = isLive(g), fut = !live && !isFinal(g);
     const row = (t, other) => {
       const win = isFinal(g) && t.score > other.score;
-      return `<div class="gteam${win ? ' win' : ''}${fav.has(t.abbrev) ? ' fav' : ''}">${logo(t.abbrev)}<span class="abbr">${esc(t.abbrev)}</span><span class="tname">${esc(nm(t.name))}</span>${fut ? '' : `<b class="sc">${t.score ?? 0}</b><span class="sog">${t.sog ?? ''}${t.sog != null ? ' SOG' : ''}</span>`}</div>`;
+      const lose = isFinal(g) && t.score < other.score;
+      const st = (get('standings')?.standings || []).find((x) => nm(x.teamAbbrev) === t.abbrev);
+      const sub = [nm(t.name), st ? `${st.wins}-${st.losses}-${st.otLosses}` : ''].filter(Boolean).join(' \u00b7 ');
+      return `<div class="gteam${win ? ' win' : ''}${lose ? ' lose' : ''}${fav.has(t.abbrev) ? ' fav' : ''}"><span class="gside">${logo(t.abbrev, 'glogo')}<span class="gnames"><b>${esc(t.abbrev)}</b><small class="muted">${esc(sub)}</small></span></span>${fut ? '' : `<span class="gsc"><b class="sc">${t.score ?? 0}</b><small class="muted">${t.sog != null ? t.sog + ' SOG' : ''}</small></span>`}</div>`;
     };
-    return `<a class="card game${live ? ' live' : ''}" href="#/game/${g.id}" id="game-${g.id}">
+    return `<a class="card game${live ? ' live' : ''}${fav.has(g.awayTeam.abbrev) || fav.has(g.homeTeam.abbrev) ? ' fav' : ''}" href="#/game/${g.id}" id="game-${g.id}">
       <div class="gstat${live ? ' on' : ''}">${esc(gameStatus(g))}</div>${row(g.awayTeam, g.homeTeam)}${row(g.homeTeam, g.awayTeam)}
-      <div class="gmeta muted small">${esc(nm(g.venue))}${g.tvBroadcasts?.length ? ' &middot; ' + esc(g.tvBroadcasts.map((b) => b.network).join(', ')) : ''}</div></a>`;
+      <div class="gmeta">${esc(nm(g.venue))}${g.tvBroadcasts?.length ? ' &middot; ' + esc(g.tvBroadcasts.map((b) => b.network).join(', ')) : ''}</div></a>`;
   }).join('');
   return `<div class="datebar">
       <a class="btn sq" href="#/scores/${shiftDate(date, -1)}" aria-label="Previous day">&lsaquo;</a>
