@@ -3,7 +3,7 @@
 NHL 2026-27 dashboard for [DashLauncher](https://github.com/SomtimesOttomation/DashLauncher). Runs on its own or as a tab in
 DashLauncher. Windows PowerShell 5.1 + WebView2, no installer, no admin rights, no build step.
 
-Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
+Team banner with favourites and team pages (schedule, results, player stats). Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
 league), skater and goalie leaders. Optional advanced stats (xG, shot quality, goalie GSAx) from MoneyPuck.
 
 ## Data sources

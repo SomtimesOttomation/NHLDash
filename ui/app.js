@@ -81,6 +81,7 @@ function ago(at) {
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   return `${Math.round(s / 3600)}h ago`;
 }
+const favs = () => new Set(state?.settings?.favorites || []);
 const isLive = (g) => g.gameState === 'LIVE' || g.gameState === 'CRIT';
 const isFinal = (g) => g.gameState === 'FINAL' || g.gameState === 'OFF';
 function liveCount(score) { return (score?.games || []).filter(isLive).length; }
@@ -122,14 +123,14 @@ views.scores = (date) => {
   routeKeys = [key];
   want(key);
   const sc = get(key);
-  const fav = state.settings.favTeam;
+  const fav = favs();
   let games = (sc?.games || []).slice();
-  games.sort((a, b) => (isLive(b) - isLive(a)) || ((b.awayTeam.abbrev === fav || b.homeTeam.abbrev === fav) - (a.awayTeam.abbrev === fav || a.homeTeam.abbrev === fav)) || a.startTimeUTC.localeCompare(b.startTimeUTC));
+  games.sort((a, b) => (isLive(b) - isLive(a)) || ((fav.has(b.awayTeam.abbrev) || fav.has(b.homeTeam.abbrev)) - (fav.has(a.awayTeam.abbrev) || fav.has(a.homeTeam.abbrev))) || a.startTimeUTC.localeCompare(b.startTimeUTC));
   const cards = games.map((g) => {
     const live = isLive(g), fut = !live && !isFinal(g);
     const row = (t, other) => {
       const win = isFinal(g) && t.score > other.score;
-      return `<div class="gteam${win ? ' win' : ''}${t.abbrev === fav ? ' fav' : ''}">${logo(t.abbrev)}<span class="abbr">${esc(t.abbrev)}</span><span class="tname">${esc(nm(t.name))}</span>${fut ? '' : `<b class="sc">${t.score ?? 0}</b><span class="sog">${t.sog ?? ''}${t.sog != null ? ' SOG' : ''}</span>`}</div>`;
+      return `<div class="gteam${win ? ' win' : ''}${fav.has(t.abbrev) ? ' fav' : ''}">${logo(t.abbrev)}<span class="abbr">${esc(t.abbrev)}</span><span class="tname">${esc(nm(t.name))}</span>${fut ? '' : `<b class="sc">${t.score ?? 0}</b><span class="sog">${t.sog ?? ''}${t.sog != null ? ' SOG' : ''}</span>`}</div>`;
     };
     return `<a class="card game${live ? ' live' : ''}" href="#/game/${g.id}" id="game-${g.id}">
       <div class="gstat${live ? ' on' : ''}">${esc(gameStatus(g))}</div>${row(g.awayTeam, g.homeTeam)}${row(g.homeTeam, g.awayTeam)}
@@ -289,7 +290,7 @@ views.standings = (hl) => {
   const st = get('standings');
   if (!st) return status('standings');
   const teams = st.standings || [];
-  const fav = state.settings.favTeam;
+  const fav = favs();
   const groups = {};
   const by = standMode === 'league' ? () => 'League' : standMode === 'conference' ? (t) => `${t.conferenceName} Conference` : (t) => `${t.divisionName} Division`;
   for (const t of teams) (groups[by(t)] ||= []).push(t);
@@ -302,7 +303,7 @@ views.standings = (hl) => {
       <thead><tr><th></th><th class="l">Team</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>PTS</th><th>P%</th><th>RW</th><th>GF</th><th>GA</th><th>DIFF</th><th>L10</th><th>STRK</th></tr></thead><tbody>
       ${groups[gname].sort((a, b) => a[seq] - b[seq]).map((t) => {
         const ab = nm(t.teamAbbrev);
-        return `<tr class="${ab === hl ? 'hl' : ''}${ab === fav ? ' fav' : ''}" id="st-${ab}"><td>${t[seq]}</td><td class="l">${logo(ab, 'slogo')} ${esc(nm(t.teamCommonName) || ab)}${t.clinchIndicator ? ` <span class="tag">${esc(t.clinchIndicator)}</span>` : ''}</td><td>${t.gamesPlayed}</td><td>${t.wins}</td><td>${t.losses}</td><td>${t.otLosses}</td><td><b>${t.points}</b></td><td>${t.pointPctg.toFixed(3).replace(/^0/, '')}</td><td>${t.regulationWins}</td><td>${t.goalFor}</td><td>${t.goalAgainst}</td><td>${t.goalDifferential > 0 ? '+' : ''}${t.goalDifferential}</td><td>${t.l10Wins}-${t.l10Losses}-${t.l10OtLosses}</td><td>${esc(t.streakCode || '')}${t.streakCount || ''}</td></tr>`;
+        return `<tr class="${ab === hl ? 'hl' : ''}${fav.has(ab) ? ' fav' : ''}" id="st-${ab}"><td>${t[seq]}</td><td class="l"><a class="tlink" href="#/team/${ab}">${logo(ab, 'slogo')} ${esc(nm(t.teamCommonName) || ab)}</a>${t.clinchIndicator ? ` <span class="tag">${esc(t.clinchIndicator)}</span>` : ''}</td><td>${t.gamesPlayed}</td><td>${t.wins}</td><td>${t.losses}</td><td>${t.otLosses}</td><td><b>${t.points}</b></td><td>${t.pointPctg.toFixed(3).replace(/^0/, '')}</td><td>${t.regulationWins}</td><td>${t.goalFor}</td><td>${t.goalAgainst}</td><td>${t.goalDifferential > 0 ? '+' : ''}${t.goalDifferential}</td><td>${t.l10Wins}-${t.l10Losses}-${t.l10OtLosses}</td><td>${esc(t.streakCode || '')}${t.streakCount || ''}</td></tr>`;
       }).join('')}</tbody></table></div></section>`).join('')}</div>`;
 };
 document.addEventListener('click', (e) => {
@@ -343,7 +344,7 @@ views.advanced = () => {
   const f1 = (v) => (v == null || v === '' ? '' : Number(v).toFixed(1));
   const f2 = (v) => (v == null || v === '' ? '' : Number(v).toFixed(2));
   const toi = (sec) => { const m = Math.round(sec / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
-  const fav = state.settings.favTeam;
+  const fav = favs();
   const sortRows = (tbl, rows) => { const k = adv.sort[tbl], d = adv.dir[tbl]; return rows.sort((a, b) => ((a[k] ?? -1e9) > (b[k] ?? -1e9) ? 1 : -1) * d); };
   const th = (tbl, k, label, l) => `<th class="sortable${l ? ' l' : ''}${adv.sort[tbl] === k ? ' sorted' : ''}" data-adv="${tbl}:${k}">${label}${adv.sort[tbl] === k ? (adv.dir[tbl] < 0 ? ' &darr;' : ' &uarr;') : ''}</th>`;
 
@@ -355,11 +356,11 @@ views.advanced = () => {
   return `<div class="segs bar1">${seg('all', 'All situations')}${seg('5on5', '5 on 5')}
       <span class="muted small push">Data: <b>MoneyPuck.com</b> &middot; updated ${esc(ago(store.get('mp:teams')?.at))}</span></div>
     <section class="card wide"><h2>Teams</h2>${teams ? `<div class="tscroll"><table class="tbl"><thead><tr>${th('teams', 'team', 'Team', 1)}${th('teams', 'games_played', 'GP')}${th('teams', 'xGoalsPercentage', 'xGF%')}${th('teams', 'corsiPercentage', 'CF%')}${th('teams', 'fenwickPercentage', 'FF%')}${th('teams', 'xGoalsFor', 'xGF')}${th('teams', 'xGoalsAgainst', 'xGA')}${th('teams', 'xgd', 'xGD')}${th('teams', 'goalsFor', 'GF')}${th('teams', 'goalsAgainst', 'GA')}${th('teams', 'gd', 'GD')}${th('teams', 'highDangerShotsFor', 'HDSF')}${th('teams', 'highDangerShotsAgainst', 'HDSA')}</tr></thead><tbody>
-      ${teams.map((r) => `<tr class="${r.team === fav ? 'fav' : ''}"><td class="l">${logo(r.team, 'slogo')} ${esc(r.team)}</td><td>${r.games_played}</td><td><b>${pct(r.xGoalsPercentage)}</b></td><td>${pct(r.corsiPercentage)}</td><td>${pct(r.fenwickPercentage)}</td><td>${f1(r.xGoalsFor)}</td><td>${f1(r.xGoalsAgainst)}</td><td>${r.xgd > 0 ? '+' : ''}${f1(r.xgd)}</td><td>${r.goalsFor}</td><td>${r.goalsAgainst}</td><td>${r.gd > 0 ? '+' : ''}${r.gd}</td><td>${r.highDangerShotsFor}</td><td>${r.highDangerShotsAgainst}</td></tr>`).join('')}</tbody></table></div>` : status('mp:teams')}</section>
+      ${teams.map((r) => `<tr class="${fav.has(r.team) ? 'fav' : ''}"><td class="l">${logo(r.team, 'slogo')} ${esc(r.team)}</td><td>${r.games_played}</td><td><b>${pct(r.xGoalsPercentage)}</b></td><td>${pct(r.corsiPercentage)}</td><td>${pct(r.fenwickPercentage)}</td><td>${f1(r.xGoalsFor)}</td><td>${f1(r.xGoalsAgainst)}</td><td>${r.xgd > 0 ? '+' : ''}${f1(r.xgd)}</td><td>${r.goalsFor}</td><td>${r.goalsAgainst}</td><td>${r.gd > 0 ? '+' : ''}${r.gd}</td><td>${r.highDangerShotsFor}</td><td>${r.highDangerShotsAgainst}</td></tr>`).join('')}</tbody></table></div>` : status('mp:teams')}</section>
     <section class="card wide"><h2>Skaters <span class="muted small">top 60 by the sorted column</span></h2>${skaters ? `<div class="tscroll"><table class="tbl"><thead><tr>${th('skaters', 'name', 'Player', 1)}${th('skaters', 'team', 'Team')}${th('skaters', 'position', 'Pos')}${th('skaters', 'games_played', 'GP')}${th('skaters', 'icetime', 'TOI')}${th('skaters', 'I_F_goals', 'G')}${th('skaters', 'I_F_xGoals', 'xG')}${th('skaters', 'gax', 'G-xG')}${th('skaters', 'I_F_points', 'P')}${th('skaters', 'I_F_shotsOnGoal', 'SOG')}${th('skaters', 'I_F_highDangerShots', 'HDS')}${th('skaters', 'onIce_xGoalsPercentage', 'On-ice xGF%')}${th('skaters', 'gameScore', 'Game score')}</tr></thead><tbody>
-      ${skaters.map((r) => `<tr class="${r.team === fav ? 'fav' : ''}"><td class="l">${esc(r.name)}</td><td>${esc(r.team)}</td><td>${esc(r.position)}</td><td>${r.games_played}</td><td>${toi(r.icetime)}</td><td>${r.I_F_goals}</td><td><b>${f2(r.I_F_xGoals)}</b></td><td>${r.gax > 0 ? '+' : ''}${f2(r.gax)}</td><td>${r.I_F_points}</td><td>${r.I_F_shotsOnGoal}</td><td>${r.I_F_highDangerShots}</td><td>${pct(r.onIce_xGoalsPercentage)}</td><td>${f1(r.gameScore)}</td></tr>`).join('')}</tbody></table></div>` : status('mp:skaters')}</section>
+      ${skaters.map((r) => `<tr class="${fav.has(r.team) ? 'fav' : ''}"><td class="l">${esc(r.name)}</td><td>${esc(r.team)}</td><td>${esc(r.position)}</td><td>${r.games_played}</td><td>${toi(r.icetime)}</td><td>${r.I_F_goals}</td><td><b>${f2(r.I_F_xGoals)}</b></td><td>${r.gax > 0 ? '+' : ''}${f2(r.gax)}</td><td>${r.I_F_points}</td><td>${r.I_F_shotsOnGoal}</td><td>${r.I_F_highDangerShots}</td><td>${pct(r.onIce_xGoalsPercentage)}</td><td>${f1(r.gameScore)}</td></tr>`).join('')}</tbody></table></div>` : status('mp:skaters')}</section>
     <section class="card wide"><h2>Goalies <span class="muted small">GSAx = goals saved above expected</span></h2>${goalies ? `<div class="tscroll"><table class="tbl"><thead><tr>${th('goalies', 'name', 'Goalie', 1)}${th('goalies', 'team', 'Team')}${th('goalies', 'games_played', 'GP')}${th('goalies', 'icetime', 'TOI')}${th('goalies', 'gsax', 'GSAx')}${th('goalies', 'xGoals', 'xGA')}${th('goalies', 'goals', 'GA')}${th('goalies', 'svp', 'SV%')}${th('goalies', 'highDangerShots', 'HD shots')}${th('goalies', 'highDangerGoals', 'HD GA')}</tr></thead><tbody>
-      ${goalies.map((r) => `<tr class="${r.team === fav ? 'fav' : ''}"><td class="l">${esc(r.name)}</td><td>${esc(r.team)}</td><td>${r.games_played}</td><td>${toi(r.icetime)}</td><td><b>${r.gsax > 0 ? '+' : ''}${f2(r.gsax)}</b></td><td>${f2(r.xGoals)}</td><td>${r.goals}</td><td>${r.svp == null ? '' : r.svp.toFixed(3).replace(/^0/, '')}</td><td>${r.highDangerShots}</td><td>${r.highDangerGoals}</td></tr>`).join('')}</tbody></table></div>` : status('mp:goalies')}</section>
+      ${goalies.map((r) => `<tr class="${fav.has(r.team) ? 'fav' : ''}"><td class="l">${esc(r.name)}</td><td>${esc(r.team)}</td><td>${r.games_played}</td><td>${toi(r.icetime)}</td><td><b>${r.gsax > 0 ? '+' : ''}${f2(r.gsax)}</b></td><td>${f2(r.xGoals)}</td><td>${r.goals}</td><td>${r.svp == null ? '' : r.svp.toFixed(3).replace(/^0/, '')}</td><td>${r.highDangerShots}</td><td>${r.highDangerGoals}</td></tr>`).join('')}</tbody></table></div>` : status('mp:goalies')}</section>
     <p class="muted small credit">Advanced stats courtesy of MoneyPuck.com, used for personal, non-commercial purposes under their published data terms.</p>`;
 };
 document.addEventListener('click', (e) => {
@@ -373,13 +374,15 @@ document.addEventListener('click', (e) => {
 });
 
 // ------------------------------------------------------------------ settings
+// Primary team colours (used for the banner tiles and team page accents).
+const COLORS = { ANA: 'f47a38', BOS: 'ffb81c', BUF: '003087', CAR: 'cc0000', CBJ: '002654', CGY: 'c8102e', CHI: 'cf0a2c', COL: '6f263d', DAL: '006847', DET: 'ce1126', EDM: 'ff4c00', FLA: 'c8102e', LAK: '111111', MIN: '154734', MTL: 'af1e2d', NJD: 'ce1126', NSH: 'ffb81c', NYI: '00539b', NYR: '0038a8', OTT: 'c52032', PHI: 'f74902', PIT: 'fcb514', SEA: '001628', SJS: '006d75', STL: '002f87', TBL: '002868', TOR: '00205b', UTA: '6cace4', VAN: '00205b', VGK: 'b4975a', WPG: '041e42', WSH: 'c8102e' };
+const teamColor = (k) => `#${COLORS[k] || '6b7280'}`;
 const TEAMS = { ANA: 'Anaheim Ducks', BOS: 'Boston Bruins', BUF: 'Buffalo Sabres', CAR: 'Carolina Hurricanes', CBJ: 'Columbus Blue Jackets', CGY: 'Calgary Flames', CHI: 'Chicago Blackhawks', COL: 'Colorado Avalanche', DAL: 'Dallas Stars', DET: 'Detroit Red Wings', EDM: 'Edmonton Oilers', FLA: 'Florida Panthers', LAK: 'Los Angeles Kings', MIN: 'Minnesota Wild', MTL: 'Montreal Canadiens', NJD: 'New Jersey Devils', NSH: 'Nashville Predators', NYI: 'New York Islanders', NYR: 'New York Rangers', OTT: 'Ottawa Senators', PHI: 'Philadelphia Flyers', PIT: 'Pittsburgh Penguins', SEA: 'Seattle Kraken', SJS: 'San Jose Sharks', STL: 'St. Louis Blues', TBL: 'Tampa Bay Lightning', TOR: 'Toronto Maple Leafs', UTA: 'Utah Mammoth', VAN: 'Vancouver Canucks', VGK: 'Vegas Golden Knights', WPG: 'Winnipeg Jets', WSH: 'Washington Capitals' };
 views.settings = () => {
   routeKeys = [];
   const s = state.settings, t = state.traffic;
   return `<div class="grid two">
-    <section class="card"><h2>Favourite team</h2><p class="muted">Shown first on Scores and highlighted in tables.</p>
-      <select id="set-fav"><option value="">None</option>${Object.entries(TEAMS).map(([k, v]) => `<option value="${k}"${s.favTeam === k ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></section>
+    <section class="card"><h2>Favourite teams</h2><p class="muted">Click the star on a team in the banner (or on its team page). Favourites sit at the front of the banner, their games show first and their rows are highlighted.</p><p>${(s.favorites || []).length ? s.favorites.map((k) => `<a class="favchip" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a>`).join(' ') : '<span class="muted">None yet.</span>'}</p></section>
     <section class="card"><h2>Automatic refresh</h2>
       <p class="muted">Off: the dash only fetches when you open a page or press Refresh (F5). On: while this tab is visible, the scores and the game you have open are refetched on a timer.</p>
       <label class="row"><span>Refresh automatically</span><input id="set-auto" type="checkbox"${s.autoRefresh ? ' checked' : ''}></label>
@@ -408,7 +411,6 @@ async function setSetting(key, value, ack = false) {
 function alertNote(msg) { const n = document.createElement('div'); n.className = 'toast'; n.textContent = msg; document.body.append(n); setTimeout(() => n.remove(), 4000); }
 document.addEventListener('change', async (e) => {
   const id = e.target.id;
-  if (id === 'set-fav') setSetting('favTeam', e.target.value);
   if (id === 'set-secs') setSetting('refreshSeconds', Number(e.target.value));
   if (id === 'set-auto') {
     const on = e.target.checked;
@@ -434,11 +436,114 @@ document.addEventListener('click', async (e) => {
   try { await bridge.request('cache.clear'); store.clear(); alertNote('Saved data cleared. Logos are kept.'); } catch (err) { alertNote(err.message); }
 });
 
+
+// ------------------------------------------------------------------ team banner (same look and behaviour as NBADash)
+let bannerSig = '';
+function renderBanner(active) {
+  const el = $('banner');
+  const fav = favs();
+  const sig = `${[...fav].join(',')}|${active}|${isDark()}`;
+  if (sig === bannerSig && el.firstChild) return;
+  bannerSig = sig;
+  const prev = el.querySelector('.banner-strip')?.scrollLeft || 0;
+  const byName = (a, b) => TEAMS[a].localeCompare(TEAMS[b]);
+  const all = Object.keys(TEAMS);
+  const f = all.filter((k) => fav.has(k)).sort(byName), rest = all.filter((k) => !fav.has(k)).sort(byName);
+  const tile = (k) => `<a class="tile${fav.has(k) ? ' fav' : ''}${k === active ? ' active' : ''}" href="#/team/${k}" role="listitem" title="${esc(TEAMS[k])}" style="--tc:${teamColor(k)}">
+      <button class="star tile-star${fav.has(k) ? ' on' : ''}" type="button" data-star="${k}" title="${fav.has(k) ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav.has(k)}">${fav.has(k) ? '★' : '☆'}</button>
+      ${logo(k, 'tile-logo')}<span class="tile-code">${k}</span></a>`;
+  el.innerHTML = `<button class="banner-btn left" type="button" aria-label="Scroll teams left">‹</button>
+    <div class="banner-strip" role="list">${f.map(tile).join('')}${f.length ? '<span class="banner-divider" aria-hidden="true"></span>' : ''}${rest.map(tile).join('')}</div>
+    <button class="banner-btn right" type="button" aria-label="Scroll teams right">›</button>`;
+  const strip = el.querySelector('.banner-strip'), left = el.querySelector('.banner-btn.left'), right = el.querySelector('.banner-btn.right');
+  const scroll = (dir) => strip.scrollBy({ left: dir * Math.max(300, strip.clientWidth * 0.8), behavior: 'smooth' });
+  left.onclick = () => scroll(-1); right.onclick = () => scroll(1);
+  strip.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+  const update = () => {
+    left.classList.toggle('hide', strip.scrollLeft < 8);
+    right.classList.toggle('hide', strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 8);
+  };
+  strip.addEventListener('scroll', update, { passive: true });
+  strip.style.scrollBehavior = 'auto'; strip.scrollLeft = prev; strip.style.scrollBehavior = '';
+  requestAnimationFrame(() => {
+    const a = strip.querySelector('.tile.active');
+    if (a && (a.offsetLeft < strip.scrollLeft || a.offsetLeft + a.offsetWidth > strip.scrollLeft + strip.clientWidth)) a.scrollIntoView({ inline: 'center', block: 'nearest' });
+    update();
+  });
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-star]');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const k = b.dataset.star, list = [...(state.settings.favorites || [])];
+  const i = list.indexOf(k);
+  if (i >= 0) list.splice(i, 1); else list.push(k);
+  state.settings.favorites = list;          // show it right away; the backend saves it
+  setSetting('favorites', list);
+}, true);
+
+// ------------------------------------------------------------------ team page
+views.team = (k) => {
+  const sk = `sched:${k}`, tk = `team:${k}`;
+  routeKeys = ['standings', sk, tk];
+  routeKeys.forEach((x) => want(x));
+  if (state.settings.moneypuck) { routeKeys.push('mp:teams', 'mp:skaters'); want('mp:teams'); want('mp:skaters'); }
+  const fav = favs().has(k);
+  const st = (get('standings')?.standings || []).find((t) => nm(t.teamAbbrev) === k);
+  const rec = st ? `<div class="trec"><b>${st.wins}-${st.losses}-${st.otLosses}</b> &middot; ${st.points} pts &middot; ${ordinal(st.divisionSequence)} in the ${esc(st.divisionName)} &middot; L10 ${st.l10Wins}-${st.l10Losses}-${st.l10OtLosses} &middot; ${esc(st.streakCode || '')}${st.streakCount || ''} streak &middot; GF ${st.goalFor} / GA ${st.goalAgainst}</div>` : '';
+  const head = `<section class="card thead" style="--tc:${teamColor(k)}">${logo(k, 'blogo')}
+      <div><div class="big2">${esc(TEAMS[k])}</div>${rec || '<div class="muted small">Record loads with the standings.</div>'}</div>
+      <button class="star big${fav ? ' on' : ''}" type="button" data-star="${k}" title="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${fav ? '★' : '☆'}</button></section>`;
+
+  // Schedule: regular season and playoffs (preseason only if that is all there is yet).
+  const sch = get(sk);
+  let games = (sch?.games || []).filter((g) => g.gameType >= 2);
+  if (sch && !games.length) games = sch.games || [];
+  const done = games.filter(isFinal), next = games.filter((g) => !isFinal(g));
+  const line = (g) => {
+    const home = g.homeTeam.abbrev === k, me = home ? g.homeTeam : g.awayTeam, op = home ? g.awayTeam : g.homeTeam;
+    const date = new Date(g.startTimeUTC).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    let res;
+    if (isFinal(g)) {
+      const w = me.score > op.score, ot = g.gameOutcome?.lastPeriodType;
+      res = `<span class="res ${w ? 'w' : 'l'}">${w ? 'W' : ot === 'OT' || ot === 'SO' ? 'OTL' : 'L'}</span> ${me.score}-${op.score}${ot === 'OT' ? ' OT' : ot === 'SO' ? ' SO' : ''}`;
+    } else if (isLive(g)) res = '<span class="res live">LIVE</span>';
+    else res = `<span class="muted">${esc(gameStatus(g))}</span>`;
+    return `<a class="sline" href="#/game/${g.id}"><span class="sdate">${esc(date)}</span><span class="svs">${home ? 'vs' : '@'}</span>${logo(op.abbrev, 'slogo')}<span class="sop">${esc(nm(op.commonName) || op.abbrev)}</span><span class="sres">${res}</span></a>`;
+  };
+  const schedule = sch ? `<div class="grid two">
+      <section class="card"><h2>Last games</h2>${done.length ? done.slice(-8).reverse().map(line).join('') : '<p class="muted">No games played yet.</p>'}</section>
+      <section class="card"><h2>Next games</h2>${next.length ? next.slice(0, 8).map(line).join('') : '<p class="muted">No games left on the schedule.</p>'}</section></div>` : `<section class="card">${status(sk)}</section>`;
+
+  // Season stats for the team's players.
+  const cs = get(tk);
+  const pct3 = (v) => (v == null ? '' : v.toFixed(3).replace(/^0/, ''));
+  const toiAvg = (sec) => (sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '');
+  const skaters = cs ? `<section class="card wide"><h2>Skaters <span class="muted small">season stats</span></h2><div class="tscroll"><table class="tbl"><thead><tr><th class="l">Skater</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>PIM</th><th>PPG</th><th>SOG</th><th>S%</th><th>TOI/GP</th><th>FO%</th></tr></thead><tbody>
+      ${(cs.skaters || []).slice().sort((a, b) => b.points - a.points || b.goals - a.goals).map((p) => `<tr><td class="l">${esc(nm(p.firstName))} <b>${esc(nm(p.lastName))}</b></td><td>${esc(p.positionCode)}</td><td>${p.gamesPlayed}</td><td>${p.goals}</td><td>${p.assists}</td><td><b>${p.points}</b></td><td>${p.plusMinus > 0 ? '+' : ''}${p.plusMinus}</td><td>${p.penaltyMinutes}</td><td>${p.powerPlayGoals}</td><td>${p.shots}</td><td>${p.shootingPctg ? (p.shootingPctg * 100).toFixed(1) : '0.0'}</td><td>${toiAvg(p.avgTimeOnIcePerGame)}</td><td>${p.faceoffWinPctg ? Math.round(p.faceoffWinPctg * 100) + '%' : ''}</td></tr>`).join('')}</tbody></table></div>
+      <div class="tscroll"><table class="tbl"><thead><tr><th class="l">Goalie</th><th>GP</th><th>GS</th><th>W</th><th>L</th><th>OTL</th><th>GAA</th><th>SV%</th><th>SA</th><th>SO</th></tr></thead><tbody>
+      ${(cs.goalies || []).map((g) => `<tr><td class="l">${esc(nm(g.firstName))} <b>${esc(nm(g.lastName))}</b></td><td>${g.gamesPlayed}</td><td>${g.gamesStarted}</td><td>${g.wins}</td><td>${g.losses}</td><td>${g.overtimeLosses}</td><td>${g.goalsAgainstAverage?.toFixed(2) ?? ''}</td><td>${pct3(g.savePercentage)}</td><td>${g.shotsAgainst}</td><td>${g.shutouts}</td></tr>`).join('')}</tbody></table></div></section>` : `<section class="card wide">${status(tk)}</section>`;
+
+  // MoneyPuck (only when turned on).
+  let mp = '';
+  if (state.settings.moneypuck) {
+    const row = (get('mp:teams') || []).find((r) => r.team === k && r.situation === 'all');
+    const r5 = (get('mp:teams') || []).find((r) => r.team === k && r.situation === '5on5');
+    const top = (get('mp:skaters') || []).filter((r) => r.team === k && r.situation === 'all').sort((a, b) => b.I_F_xGoals - a.I_F_xGoals).slice(0, 5);
+    const p = (v) => (v == null ? '' : (v * 100).toFixed(1) + '%');
+    mp = row ? `<section class="card"><h2>Advanced <span class="muted small">MoneyPuck.com</span></h2>
+      <div class="kpis"><div><b>${p(row.xGoalsPercentage)}</b><small>xGF% all</small></div><div><b>${p(r5?.xGoalsPercentage)}</b><small>xGF% 5v5</small></div><div><b>${p(row.corsiPercentage)}</b><small>CF%</small></div><div><b>${row.xGoalsFor.toFixed(1)}-${row.xGoalsAgainst.toFixed(1)}</b><small>xGF-xGA</small></div></div>
+      ${top.length ? `<p class="muted small">Top xG: ${top.map((t) => `${esc(t.name)} ${t.I_F_xGoals.toFixed(1)}`).join(' &middot; ')}</p>` : ''}</section>` : `<section class="card">${status('mp:teams') || '<p class="muted">No MoneyPuck row for this team yet.</p>'}</section>`;
+  }
+  return head + schedule + mp + skaters;
+};
+
 // ------------------------------------------------------------------ routing and render
 function parseRoute() {
   const h = location.hash || '#/';
   let m;
   if ((m = h.match(/^#\/game\/(\d{10})$/))) return { view: 'game', arg: m[1], tab: 'scores' };
+  if ((m = h.match(/^#\/team\/([A-Z]{3})$/))) return { view: 'team', arg: m[1], tab: '' };
   if ((m = h.match(/^#\/scores\/(\d{4}-\d{2}-\d{2})$/))) return { view: 'scores', arg: m[1], tab: 'scores' };
   if ((m = h.match(/^#\/standings(?:\/([A-Z]{3}))?$/))) return { view: 'standings', arg: m[1], tab: 'standings' };
   if (h === '#/leaders') return { view: 'leaders', tab: 'leaders' };
@@ -458,6 +563,7 @@ function render() {
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === r.tab));
   const y = window.scrollY;
   const focusId = document.activeElement?.id;
+  renderBanner(r.view === 'team' ? r.arg : '');
   $('view').innerHTML = views[r.view](r.arg);
   if (focusId && $(focusId) && focusId.startsWith('set-')) $(focusId).focus();
   window.scrollTo(0, y);
@@ -536,7 +642,7 @@ $('btn-refresh').addEventListener('click', async () => {
 // Search: teams (go to standings) and players from whatever is loaded (MoneyPuck list, leaders, open box scores).
 const res = $('psearch-results');
 function searchIndex() {
-  const out = Object.entries(TEAMS).map(([k, v]) => ({ label: `${v} (${k})`, href: `#/standings/${k}`, text: `${v} ${k}`.toLowerCase() }));
+  const out = Object.entries(TEAMS).map(([k, v]) => ({ label: `${v} (${k})`, href: `#/team/${k}`, text: `${v} ${k}`.toLowerCase() }));
   const sc = get(`score:${today()}`);
   for (const g of sc?.games || []) {
     const lbl = `${g.awayTeam.abbrev} @ ${g.homeTeam.abbrev}, today ${gameStatus(g)}`;

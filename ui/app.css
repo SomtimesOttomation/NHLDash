@@ -203,3 +203,50 @@ input[type=number] { width: 80px; }
 .foot { text-align: center; }
 .stand .tbl th, .stand .tbl td { padding: 5px 4px; }
 .stand .card { padding: 16px 14px; }
+
+/* Team banner: copied from NBADash so every dash looks the same. */
+.banner { position: relative; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.banner-strip { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 10px 40px; scroll-behavior: smooth; }
+.banner-strip::-webkit-scrollbar { display: none; }
+.banner-divider { flex: 0 0 1px; background: var(--line); margin: 8px 6px; }
+.banner-btn { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 28px; height: 64px; border: 0; background: var(--surface); box-shadow: var(--shadow); font-size: 22px; color: var(--muted); }
+.banner-btn.left { left: 0; border-radius: 0 10px 10px 0; }
+.banner-btn.right { right: 0; border-radius: 10px 0 0 10px; }
+.banner-btn.hide { display: none; }
+.tile { position: relative; flex: 0 0 auto; width: 112px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 6px;
+  border-radius: 12px; border: 1px solid transparent; transition: transform .15s, background .15s; color: var(--text); text-decoration: none; }
+.tile:hover { background: var(--surface2); transform: translateY(-2px); }
+.tile.fav { background: color-mix(in srgb, var(--tc) 10%, transparent); }
+.tile.active { border-color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); }
+.tile-logo { width: 92px; height: 60px; object-fit: contain; display: block; }
+.tile-code { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .04em; }
+.tile-star { position: absolute; top: 1px; right: 1px; opacity: 0; font-size: 13px; }
+.tile:hover .tile-star, .tile.fav .tile-star { opacity: 1; }
+.star { background: none; border: 0; padding: 2px 4px; color: var(--muted); font-size: 18px; line-height: 1; }
+.star:hover, .star.on { color: #f5a524; }
+.star.big { font-size: 28px; margin-left: auto; align-self: flex-start; }
+.navpill-row { padding-top: 0; }
+
+/* Team page */
+.thead { display: flex; align-items: center; gap: 18px; margin-top: 4px; border-top: 4px solid var(--tc); }
+.thead .blogo { width: 84px; height: 84px; object-fit: contain; }
+.trec { margin-top: 4px; color: var(--muted); }
+.trec b { color: var(--text); }
+.sline { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-top: 1px solid var(--line); color: var(--text); text-decoration: none; border-radius: 6px; }
+.sline:first-of-type { border-top: 0; }
+.sline:hover { background: var(--surface2); }
+.sdate { width: 52px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.svs { width: 18px; color: var(--muted); font-size: 12px; }
+.sop { flex: 1; }
+.sres { font-variant-numeric: tabular-nums; }
+.res { display: inline-block; min-width: 30px; text-align: center; font-size: 11px; font-weight: 700; border-radius: 5px; padding: 1px 4px; margin-right: 4px; }
+.res.w { background: color-mix(in srgb, #16a34a 18%, transparent); color: #16a34a; }
+.res.l { background: color-mix(in srgb, var(--live) 15%, transparent); color: var(--live); }
+.res.live { background: var(--live); color: #fff; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0; }
+.kpis div { background: var(--surface2); border-radius: 10px; padding: 10px; text-align: center; }
+.kpis b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.kpis small { color: var(--muted); font-size: 11px; }
+a.tlink { color: inherit; text-decoration: none; }
+a.tlink:hover { text-decoration: underline; }
+.favchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: var(--surface2); color: var(--text); text-decoration: none; margin: 2px; }
