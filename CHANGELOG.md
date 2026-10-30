@@ -6,6 +6,8 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.3.0 (2026-10-29)
+
 **Feature**
 - Team banner (same as NBADash) with starred favourites first; favourites can now be more than one team.
 - Team pages: record, last and next games, season player stats, MoneyPuck summary when turned on.
