@@ -14,7 +14,7 @@ let routeKeys = [];               // keys the current view needs (Refresh refetc
 // ------------------------------------------------------------------ data
 async function want(key, force = false) {
   const cur = store.get(key) || {};
-  if (!force && (cur.body !== undefined || cur.loading)) return;
+  if (!force && (cur.body !== undefined || cur.loading || cur.error)) return;   // a failed key waits for Refresh
   store.set(key, { ...cur, loading: true, error: null });
   try { await bridge.request('data.get', { key, force }); }
   catch (e) { store.set(key, { ...store.get(key), loading: false, error: e.message }); render(); }
