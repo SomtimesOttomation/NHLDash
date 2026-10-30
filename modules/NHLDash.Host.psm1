@@ -39,7 +39,7 @@ $script:LogoBase = 'https://assets.nhle.com/logos/nhl/svg/'
 $script:MoneyPuck = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/'
 
 function New-DefaultSettings {
-    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favTeam = '' }
+    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; moneypuck = $false; mpAck = $false; favorites = @() }
 }
 
 # ---------------------------------------------------------------- page messages
@@ -63,11 +63,20 @@ function Read-Settings {
     $s.autoRefresh = [bool]$s.autoRefresh; $s.autoAck = [bool]$s.autoAck
     $s.moneypuck = [bool]$s.moneypuck; $s.mpAck = [bool]$s.mpAck
     $s.refreshSeconds = Limit-Seconds $s.refreshSeconds
-    if ([string]$s.favTeam -notmatch '^[A-Z]{3}$') { $s.favTeam = '' }
+    $old = $null; try { if (Test-Path $script:SettingsFile) { $old = ([IO.File]::ReadAllText($script:SettingsFile) | ConvertFrom-Json).favTeam } } catch { }
+    $list = @($s.favorites)
+    if ($old) { $list += [string]$old }      # 0.2.0 kept one favourite team
+    $s.favorites = Limit-Teams $list
     return $s
 }
 function Save-Settings {
     try { [IO.File]::WriteAllText($script:SettingsFile, (ConvertTo-Json -InputObject $script:Settings -Compress)) } catch { }
+}
+function Limit-Teams {
+    param($Value)
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($t in @($Value)) { $v = [string]$t; if ($v -cmatch '^[A-Z]{3}$' -and -not $out.Contains($v) -and $out.Count -lt 32) { $out.Add($v) } }
+    return , $out.ToArray()
 }
 function Limit-Seconds { param($Value) $n = 60; try { $n = [int]$Value } catch { }; return [Math]::Max(20, [Math]::Min(600, $n)) }
 
@@ -86,6 +95,8 @@ function Resolve-DataKey {
         $ttl = if ($Matches[1] -lt $today) { 3600 } else { 15 }
         return @{ Key = $k; Url = $script:NhlApi + 'score/' + $Matches[1]; File = "score-$($Matches[1]).json"; Kind = 'json'; Ttl = $ttl }
     }
+    if ($k -cmatch '^sched:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-schedule-season/$($Matches[1])/now"; File = "sched-$($Matches[1]).json"; Kind = 'json'; Ttl = 600 } }
+    if ($k -cmatch '^team:([A-Z]{3})$') { return @{ Key = $k; Url = $script:NhlApi + "club-stats/$($Matches[1])/now"; File = "team-$($Matches[1]).json"; Kind = 'json'; Ttl = 1800 } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }
@@ -95,7 +106,7 @@ function Resolve-DataKey {
     }
     if ($k -match '^box:(\d{10})$') { return @{ Key = $k; Url = $script:NhlApi + "gamecenter/$($Matches[1])/boxscore"; File = "box-$($Matches[1]).json"; Kind = 'json'; Ttl = 15 } }
     if ($k -match '^pbp:(\d{10})$') { return @{ Key = $k; Url = $script:NhlApi + "gamecenter/$($Matches[1])/play-by-play"; File = "pbp-$($Matches[1]).json"; Kind = 'json'; Ttl = 15 } }
-    if ($k -match '^logo:([A-Z]{3})(:dark)?$') {
+    if ($k -cmatch '^logo:([A-Z]{3})(:dark)?$') {
         $v = if ($Matches[2]) { 'dark' } else { 'light' }
         $f = "logos/$($Matches[1])_$v.svg"
         return @{ Key = $k; Url = $script:LogoBase + "$($Matches[1])_$v.svg"; File = $f; Kind = 'svg'; Ttl = 2592000 }
@@ -367,7 +378,7 @@ function Invoke-DashCommand {
                         if ($on -and -not [bool]$a.ack -and -not $s.mpAck) { ReplyError $id 'MoneyPuck needs the warning acknowledged.'; return }
                         $s.moneypuck = $on; if ($on) { $s.mpAck = $true }
                     }
-                    'favTeam' { $v = [string]$a.value; if ($v -and $v -notmatch '^[A-Z]{3}$') { ReplyError $id 'bad team'; return }; $s.favTeam = $v }
+                    'favorites' { $s.favorites = Limit-Teams $a.value }
                     default { ReplyError $id 'unknown setting'; return }
                 }
                 Save-Settings
