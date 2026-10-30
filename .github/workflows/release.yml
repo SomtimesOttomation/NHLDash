@@ -1,0 +1,46 @@
+name: Release assets
+
+# You publish the release on GitHub (tag vX.Y.Z). This builds the update package and attaches it.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Check the tag matches the VERSION file
+        run: |
+          V="$(tr -d '[:space:]' < VERSION)"
+          if [ "v$V" != "$TAG" ]; then
+            echo "::error::Release tag $TAG does not match the VERSION file (v$V). Delete the release and tag, fix VERSION, and publish again."
+            exit 1
+          fi
+
+      - name: Check PowerShell and batch files are ASCII-only
+        run: |
+          if grep -rIlP '[^\x00-\x7F]' --include='*.ps1' --include='*.psm1' --include='*.bat' .; then
+            echo "::error::Non-ASCII characters found in the files listed above (Windows PowerShell 5.1 misreads them)."
+            exit 1
+          fi
+
+      - name: Build the zip and checksum
+        run: |
+          mkdir dist
+          git archive --format=zip -o "dist/NHLDash-$TAG.zip" "$TAG"
+          (cd dist && sha256sum "NHLDash-$TAG.zip" > "NHLDash-$TAG.zip.sha256")
+          cat "dist/NHLDash-$TAG.zip.sha256"
+          unzip -l "dist/NHLDash-$TAG.zip" | tail -n 3
+
+      - name: Attach to the release
+        run: gh release upload "$TAG" dist/* --clobber
