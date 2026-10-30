@@ -6,6 +6,20 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+**Feature**
+- Updater: the version button opens the update window (check, download, verify, install, roll back), like NBADash.
+- Player pages: bio, this season, game log, NHL career; player names link to them everywhere.
+- Season sync with the week bar and week pages; traffic details page.
+- Power rankings, rookie watch, East-West report, and compare for two teams or two players.
+- Moves tab: transactions, injuries and free agents (ESPN), with team injuries on team pages.
+- Game flow chart and momentum numbers; hover cards that explain stat terms.
+
+**Bug/Fix**
+- A failed download is no longer retried on every redraw.
+
+**Housekeeping**
+- Data sources list now includes the NHL stats API, ESPN and GitHub releases.
+
 ## 0.3.0 (2026-10-29)
 
 **Feature**
