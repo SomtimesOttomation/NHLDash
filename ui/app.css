@@ -317,3 +317,15 @@ a.seg.on { color: var(--on-accent2); }
 .txrow.fav { background: color-mix(in srgb, var(--accent2) 7%, transparent); }
 .txd { flex: 1; }
 .tbl td.wrap { white-space: normal; min-width: 260px; text-align: left; }
+
+/* Game flow */
+.flow { width: 100%; height: auto; display: block; margin: 6px 0; }
+.flow .pline { stroke: var(--line); stroke-dasharray: 3 3; }
+.flow .plabel { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.flow path { fill: none; stroke-width: 2.4; stroke-linejoin: round; }
+.flow .fa { stroke: #f59e0b; } .flow .fh { stroke: var(--accent2); }
+.flow .ga { fill: #f59e0b; stroke: var(--surface); stroke-width: 2; } .flow .gh { fill: var(--accent2); stroke: var(--surface); stroke-width: 2; }
+/* Hover cards */
+.tipcard { position: absolute; z-index: 80; width: 320px; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.45; pointer-events: none; text-align: left; white-space: normal; }
+.tipcard b { display: block; margin-bottom: 3px; }
+.tipcard[hidden] { display: none; }

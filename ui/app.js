@@ -166,6 +166,7 @@ views.game = (id) => {
       <section class="card"><h2>Scoring</h2>${p ? scoring(p) : status(pbp)}</section>
       <section class="card"><h2>Shot map</h2>${p ? shotMap(p) : status(pbp)}</section>
     </div>
+    <section class="card wide"><h2>Game flow</h2>${p ? gameFlow(p) : status(pbp)}</section>
     <section class="card wide"><h2>${esc(teamName(a))}</h2>${boxTable(b.playerByGameStats?.awayTeam)}</section>
     <section class="card wide"><h2>${esc(teamName(h))}</h2>${boxTable(b.playerByGameStats?.homeTeam)}</section>`;
 };
@@ -975,6 +976,118 @@ document.addEventListener('click', (e) => {
   render();
 });
 
+
+// ------------------------------------------------------------------ game flow (from the play-by-play already loaded for the shot map)
+function gameFlow(p) {
+  const homeId = p.homeTeam.id, A = p.awayTeam.abbrev, H = p.homeTeam.abbrev;
+  const secs = (e) => { const n = e.periodDescriptor?.number || 1; const [m, s2] = String(e.timeInPeriod || '0:0').split(':').map(Number); return (n - 1) * 1200 + m * 60 + s2; };
+  const plays = (p.plays || []).filter((e) => e.periodDescriptor?.periodType !== 'SO').slice().sort((a, b) => secs(a) - secs(b));
+  const attempts = { a: [[0, 0]], h: [[0, 0]] };
+  let ca = 0, ch = 0, ga = 0, gh = 0, end = 3600;
+  const goals = [];
+  let lead = 0, maxLead = { a: 0, h: 0 }, changes = 0, ties = 0, runTeam = '', run = 0, bestRun = { n: 0, t: '' };
+  let leadSince = 0, leadTime = { a: 0, h: 0 }, trailBy = { a: 0, h: 0 };
+  for (const e of plays) {
+    const t = secs(e); end = Math.max(end, t);
+    const d = e.details || {};
+    const home = d.eventOwnerTeamId === homeId;
+    if (['shot-on-goal', 'missed-shot', 'blocked-shot', 'goal'].includes(e.typeDescKey)) {
+      // a blocked shot's owner is the blocking team; the attempt belongs to the other side
+      const shooterHome = e.typeDescKey === 'blocked-shot' ? !home : home;
+      if (shooterHome) attempts.h.push([t, ++ch]); else attempts.a.push([t, ++ca]);
+    }
+    if (e.typeDescKey !== 'goal') continue;
+    const before = lead;
+    if (lead > 0) leadTime.h += t - leadSince; else if (lead < 0) leadTime.a += t - leadSince;
+    leadSince = t;
+    if (home) gh++; else ga++;
+    lead = gh - ga;
+    if (Math.sign(before) !== 0 && Math.sign(lead) !== 0 && Math.sign(before) !== Math.sign(lead)) changes++;
+    if (before !== 0 && lead === 0) ties++;
+    if (Math.sign(before) === 0 && lead !== 0 && goals.length && Math.sign(lead) !== Math.sign(goals.at(-1).leadBefore || 0) && goals.at(-1).leadBefore) changes++;
+    maxLead.h = Math.max(maxLead.h, lead); maxLead.a = Math.max(maxLead.a, -lead);
+    trailBy.h = Math.max(trailBy.h, -lead); trailBy.a = Math.max(trailBy.a, lead);
+    const tm = home ? 'h' : 'a';
+    run = tm === runTeam ? run + 1 : 1; runTeam = tm;
+    if (run > bestRun.n) bestRun = { n: run, t: tm };
+    goals.push({ t, home, leadBefore: before, score: `${ga}-${gh}` });
+  }
+  if (lead > 0) leadTime.h += end - leadSince; else if (lead < 0) leadTime.a += end - leadSince;
+  const fin = isFinal(p);
+  const comeback = fin && ((gh > ga && trailBy.h >= 2) ? `${H} came back from ${trailBy.h} down` : (ga > gh && trailBy.a >= 2) ? `${A} came back from ${trailBy.a} down` : '');
+  const late = goals.filter((g) => g.t >= 3300 && g.t < 3600 && Math.abs(g.leadBefore) <= 1).length;
+  // chart
+  const W = 1100, Ht = 190, max = Math.max(ca, ch, 10);
+  const x = (t) => (t / end) * W, y = (v) => Ht - (v / max) * (Ht - 10);
+  const line = (pts) => pts.map(([t, v], i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ') + ` L${W},${y(pts.at(-1)[1]).toFixed(1)}`;
+  const pers = Math.ceil(end / 1200);
+  const fmtT = (s2) => `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`;
+  const svg = `<svg class="flow" viewBox="-4 -4 ${W + 8} ${Ht + 22}" role="img" aria-label="Shot attempts over the game">
+      ${Array.from({ length: pers - 1 }, (_, i) => `<line x1="${x((i + 1) * 1200)}" y1="0" x2="${x((i + 1) * 1200)}" y2="${Ht}" class="pline"/>`).join('')}
+      ${Array.from({ length: pers }, (_, i) => `<text x="${x(i * 1200 + 600)}" y="${Ht + 14}" class="plabel">${i < 3 ? 'P' + (i + 1) : 'OT'}</text>`).join('')}
+      <path d="${line(attempts.a)}" class="fa"/><path d="${line(attempts.h)}" class="fh"/>
+      ${goals.map((g) => { const pts = g.home ? attempts.h : attempts.a; const v = (pts.filter(([t]) => t <= g.t).at(-1) || [0, 0])[1]; return `<circle cx="${x(g.t)}" cy="${y(v)}" r="5" class="${g.home ? 'gh' : 'ga'}"><title>${esc(g.home ? H : A)} goal ${fmtT(g.t % 1200 || 0)} P${Math.min(4, Math.floor(g.t / 1200) + 1)} (${g.score})</title></circle>`; }).join('')}
+    </svg>`;
+  const kp = (l, v) => `<div><b>${v}</b><small>${l}</small></div>`;
+  const mins = (s2) => `${Math.round(s2 / 60)} min`;
+  return `${svg}<div class="legend small"><span><i class="a sog"></i>${esc(A)} shot attempts (${ca})</span><span><i class="h sog"></i>${esc(H)} shot attempts (${ch})</span><span class="muted">Dots are goals. Attempts include blocked and missed shots.</span></div>
+    <div class="kpis">${kp('lead changes', changes)}${kp('times tied after a lead', ties)}${kp('biggest lead', maxLead.a || maxLead.h ? `${maxLead.a >= maxLead.h ? A : H} +${Math.max(maxLead.a, maxLead.h)}` : '-')}${kp('longest scoring run', bestRun.n ? `${bestRun.t === 'h' ? H : A} ${bestRun.n}` : '-')}${kp(`time leading ${A} / ${H}`, `${mins(leadTime.a)} / ${mins(leadTime.h)}`)}${kp('close-game goals in the last 5 min', late)}</div>
+    ${comeback ? `<p><span class="tag">Comeback</span> ${esc(comeback)}.</p>` : ''}`;
+}
+
+// ------------------------------------------------------------------ hover cards for stat terms
+const GLOSS = {
+  'xGF%': 'Expected-goals share: expected goals for / (for + against) while the team (or player) is on the ice. Expected goals weigh every unblocked shot by how often shots like it (distance, angle, type, rebound, rush) go in. Over 50% means a team is creating better chances than it allows. Source: MoneyPuck.',
+  'On-ice xGF%': 'Expected-goals share while this player is on the ice (see xGF%). Source: MoneyPuck.',
+  'CF%': 'Corsi share: all shot attempts for / (for + against), including blocked and missed shots. A rough measure of puck possession. Source: MoneyPuck.',
+  'FF%': 'Fenwick share: like CF% but leaves out blocked shots. Source: MoneyPuck.',
+  xGF: 'Expected goals for: the sum of each unblocked shot\'s chance of going in. Source: MoneyPuck.',
+  xGA: 'Expected goals against (see xGF). For goalies, the goals an average goalie would allow on the shots faced. Source: MoneyPuck.',
+  xGD: 'Expected goal difference: xGF minus xGA.',
+  xG: 'Expected goals: how many goals the player\'s shots would produce for an average shooter. Source: MoneyPuck.',
+  'G-xG': 'Goals minus expected goals. Positive means finishing better than the shot quality suggests (skill or luck).',
+  GSAx: 'Goals saved above expected: expected goals against minus goals actually allowed. Positive means the goalie stopped more than an average goalie would. Source: MoneyPuck.',
+  HDSF: 'High-danger shots for: unblocked shots MoneyPuck rates at 20%+ to score, mostly from the slot and rebounds.',
+  HDSA: 'High-danger shots against (see HDSF).',
+  HDS: 'High-danger shots taken by the player (20%+ chance to score). Source: MoneyPuck.',
+  'HD shots': 'High-danger shots faced (20%+ chance to score). Source: MoneyPuck.',
+  'HD GA': 'Goals allowed on high-danger shots. Source: MoneyPuck.',
+  'Game score': 'Dom Luszczyszyn\'s single-number game rating, averaged by MoneyPuck: goals, assists, shots, blocks, penalties, faceoffs and on-ice shot and goal differences, weighted.',
+  'P%': 'Points percentage: points earned / points possible (2 per game).',
+  RW: 'Regulation wins: the first tiebreaker in the standings.',
+  'GD/GP': 'Goal difference per game played.',
+  SOS: 'Strength of schedule: the average points % of the opponents played so far.',
+  PPP: 'Power-play points: goals and assists scored with a man advantage.',
+  PPG: 'Power-play goals.',
+  'S%': 'Shooting percentage: goals / shots on goal.',
+  'TOI/GP': 'Average time on ice per game (minutes:seconds).',
+  'FO%': 'Faceoff win percentage.',
+  'SV%': 'Save percentage: saves / shots on goal faced.',
+  GAA: 'Goals-against average: goals allowed per 60 minutes played.',
+  '+/-': 'Plus/minus: even-strength and short-handed goals for minus against while on the ice.',
+  'Rookie score': ROOKIE_SCORE,
+  Score: FORMULA,
+  SOG: 'Shots on goal: shots that reached the goalie or went in.',
+  OTL: 'Overtime and shootout losses (worth 1 point).',
+  L10: 'Record in the last 10 games (W-L-OTL).',
+};
+function addGloss(root) {
+  root.querySelectorAll('th, .kpis small, .cmpmid small').forEach((el) => {
+    const key = el.textContent.replace(/[↑↓]/g, '').trim();
+    if (GLOSS[key]) { el.dataset.gloss = key; el.classList.add('hint'); }
+  });
+}
+const tip = document.createElement('div'); tip.className = 'tipcard'; tip.hidden = true; document.body.append(tip);
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest('[data-gloss]');
+  if (!el) { tip.hidden = true; return; }
+  tip.innerHTML = `<b>${esc(el.dataset.gloss)}</b><div>${esc(GLOSS[el.dataset.gloss])}</div>`;
+  tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 328, r.left + r.width / 2 - 160))}px`;
+  tip.style.top = `${r.bottom + 8 + window.scrollY}px`;
+});
+
 // ------------------------------------------------------------------ updates (same window and steps as NBADash)
 const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
 const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
@@ -1090,6 +1203,8 @@ function render() {
   renderWeekBar(r.view === 'week' ? Number(r.arg) : 0);
   renderCmpBar();
   $('view').innerHTML = views[r.view](r.arg);
+  addGloss($('view'));
+  tip.hidden = true;
   if (focusId && $(focusId) && focusId.startsWith('set-')) $(focusId).focus();
   window.scrollTo(0, y);
   if (r.view === 'standings' && r.arg && !render.scrolled) { $(`st-${r.arg}`)?.scrollIntoView({ block: 'center' }); render.scrolled = true; }
