@@ -142,7 +142,7 @@ views.scores = (date) => {
   }).join('');
   const d0 = new Date(date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   const title = date === today() ? 'Today' : date === shiftDate(today(), -1) ? 'Yesterday' : date === shiftDate(today(), 1) ? 'Tomorrow' : 'Games';
-  return `<div class="games-wrap"><div class="section-head"><h2>${title}<small>${esc(d0)}${sc ? ` &middot; ${games.length} game${games.length === 1 ? '' : 's'}` : ''}</small></h2>
+  return `<div class="games-wrap" style="--n:${Math.max(1, Math.min(games.length, 4))}"><div class="section-head"><h2>${title}<small>${esc(d0)}${sc ? ` &middot; ${games.length} game${games.length === 1 ? '' : 's'}` : ''}</small></h2>
       <span class="dnav"><a class="btn sq" href="#/scores/${shiftDate(date, -1)}" aria-label="Previous day">&lsaquo;</a>${date !== today() ? '<a class="btn" href="#/">Today</a>' : ''}<a class="btn sq" href="#/scores/${shiftDate(date, 1)}" aria-label="Next day">&rsaquo;</a></span></div>
     ${status(key)}
     ${sc && !games.length ? '<div class="note">No games on this day.</div>' : ''}

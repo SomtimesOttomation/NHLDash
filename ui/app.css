@@ -388,3 +388,9 @@ a.seg.on { color: var(--on-accent2); }
 .glogo, .tile-logo, .blogo, .slogo, .tlogo { pointer-events: none; }
 .grid.games { padding: 0; max-width: none; }
 .games-wrap { max-width: 1238px; }
+
+/* Scores: the block is exactly as wide as its cards (1 to 4 across), so it and its heading/arrows sit centred */
+.games-wrap { width: calc(var(--n, 4) * 299px + (var(--n, 4) - 1) * 14px); max-width: 100%; }
+.grid.games { grid-template-columns: repeat(var(--n, 4), 299px); }
+@media (max-width: 1320px) { .games-wrap { width: auto; } .grid.games { grid-template-columns: repeat(auto-fill, 299px); } }
+.dnav .btn { height: 30px; padding: 0 12px; display: inline-grid; place-items: center; }
