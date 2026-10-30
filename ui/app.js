@@ -133,22 +133,20 @@ views.scores = (date) => {
       const win = isFinal(g) && t.score > other.score;
       const lose = isFinal(g) && t.score < other.score;
       const st = (get('standings')?.standings || []).find((x) => nm(x.teamAbbrev) === t.abbrev);
-      const sub = [nm(t.name), st ? `${st.wins}-${st.losses}-${st.otLosses}` : ''].filter(Boolean).join(' \u00b7 ');
+      const sub = st ? `${st.wins}-${st.losses}-${st.otLosses}` : nm(t.name);
       return `<div class="gteam${win ? ' win' : ''}${lose ? ' lose' : ''}${fav.has(t.abbrev) ? ' fav' : ''}"><span class="gside">${logo(t.abbrev, 'glogo')}<span class="gnames"><b>${esc(t.abbrev)}</b><small class="muted">${esc(sub)}</small></span></span>${fut ? '' : `<span class="gsc"><b class="sc">${t.score ?? 0}</b><small class="muted">${t.sog != null ? t.sog + ' SOG' : ''}</small></span>`}</div>`;
     };
     return `<a class="card game${live ? ' live' : ''}${fav.has(g.awayTeam.abbrev) || fav.has(g.homeTeam.abbrev) ? ' fav' : ''}" href="#/game/${g.id}" id="game-${g.id}">
       <div class="gstat${live ? ' on' : ''}">${esc(gameStatus(g))}</div>${row(g.awayTeam, g.homeTeam)}${row(g.homeTeam, g.awayTeam)}
       <div class="gmeta">${esc(nm(g.venue))}${g.tvBroadcasts?.length ? ' &middot; ' + esc(g.tvBroadcasts.map((b) => b.network).join(', ')) : ''}</div></a>`;
   }).join('');
-  return `<div class="datebar">
-      <a class="btn sq" href="#/scores/${shiftDate(date, -1)}" aria-label="Previous day">&lsaquo;</a>
-      <strong>${esc(niceDate(date))}</strong>
-      <a class="btn sq" href="#/scores/${shiftDate(date, 1)}" aria-label="Next day">&rsaquo;</a>
-      ${date !== today() ? '<a class="btn" href="#/">Today</a>' : ''}
-    </div>
+  const d0 = new Date(date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const title = date === today() ? 'Today' : date === shiftDate(today(), -1) ? 'Yesterday' : date === shiftDate(today(), 1) ? 'Tomorrow' : 'Games';
+  return `<div class="games-wrap"><div class="section-head"><h2>${title}<small>${esc(d0)}${sc ? ` &middot; ${games.length} game${games.length === 1 ? '' : 's'}` : ''}</small></h2>
+      <span class="dnav"><a class="btn sq" href="#/scores/${shiftDate(date, -1)}" aria-label="Previous day">&lsaquo;</a>${date !== today() ? '<a class="btn" href="#/">Today</a>' : ''}<a class="btn sq" href="#/scores/${shiftDate(date, 1)}" aria-label="Next day">&rsaquo;</a></span></div>
     ${status(key)}
     ${sc && !games.length ? '<div class="note">No games on this day.</div>' : ''}
-    <div class="grid games">${cards}</div>`;
+    <div class="grid games">${cards}</div></div>`;
 };
 
 views.game = (id) => {

@@ -366,3 +366,25 @@ a.seg.on { color: var(--on-accent2); }
 .weeklink:hover { background: var(--surface2); }
 .weeklink.active { background: var(--surface2); color: var(--text); font-weight: 700; box-shadow: inset 0 0 0 1px var(--line); }
 @media (max-width: 700px) { .grid.two { grid-template-columns: 1fr; } #view { padding: 14px 12px 50px; } }
+
+/* ---------------------------------------------------------------- closer to NBADash (screenshot comparison) */
+/* game grid: fixed-width columns, centred as a block, like NBADash's 4-across layout */
+.games-wrap { max-width: 1254px; margin: 0 auto; }
+.grid.games { grid-template-columns: repeat(auto-fill, 299px); justify-content: center; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 0 12px; }
+.section-head:first-child { margin-top: 4px; }
+.section-head h2 { font-size: 18px; font-weight: 650; margin: 0; }
+.section-head h2 small { margin-left: 10px; font-size: 13px; font-weight: 400; color: var(--muted); }
+.dnav { display: inline-flex; gap: 6px; }
+/* NHL SVG logos carry wide empty margins; scale them up so they fill the box like NBADash's */
+.glogo, .tile-logo, .blogo, .slogo, .tlogo { transform: scale(1.32); }
+.tile-logo { width: 92px; height: 92px; }
+.glogo { width: 68px; height: 68px; }
+/* banner tiles sit on a soft card, as in NBADash */
+.tile { background: var(--surface2); padding: 12px 10px; }
+.tile.fav { background: color-mix(in srgb, var(--tc) 18%, var(--surface2)); }
+.banner-strip { padding: 10px 40px; gap: 8px; }
+.tile-star { z-index: 2; }
+.glogo, .tile-logo, .blogo, .slogo, .tlogo { pointer-events: none; }
+.grid.games { padding: 0; max-width: none; }
+.games-wrap { max-width: 1238px; }
