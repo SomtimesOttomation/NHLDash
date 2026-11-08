@@ -8,7 +8,8 @@ const nm = (o) => (o && typeof o === 'object' ? o.default : o) || '';
 
 let state = null;                 // snapshot from the backend
 let standaloneTheme = 'system';
-const store = new Map();          // key -> { body, at, error, loading }
+const store = new Map();
+const dataToggles = [];   // features add { id, label, hint, get, set } here for Settings > Data (Form, standings moves)
 let routeKeys = [];               // keys the current view needs (Refresh refetches these)
 
 // ------------------------------------------------------------------ data
@@ -168,6 +169,7 @@ views.game = (id) => {
       <section class="card"><h2>Scoring</h2>${p ? scoring(p) : status(pbp)}</section>
       <section class="card"><h2>Shot map</h2>${p ? shotMap(p) : status(pbp)}</section>
     </div>
+    ${isFinal(b) || isLive(b) ? playersOfGame(b) : ''}
     <section class="card wide"><h2>Game flow</h2>${p ? gameFlow(p) : status(pbp)}</section>
     <section class="card wide"><h2>${esc(teamName(a))}</h2>${boxTable(b.playerByGameStats?.awayTeam)}</section>
     <section class="card wide"><h2>${esc(teamName(h))}</h2>${boxTable(b.playerByGameStats?.homeTeam)}</section>`;
@@ -317,20 +319,156 @@ document.addEventListener('click', (e) => {
   render();
 });
 
-const leaderNames = { points: 'Points', goals: 'Goals', assists: 'Assists', plusMinus: 'Plus/minus', wins: 'Wins', savePctg: 'Save %', goalsAgainstAverage: 'Goals against avg.', shutouts: 'Shutouts' };
+// ------------------------------------------------------------------ season stats from saved box scores (season sync)
+// Row layout of the compact box scores the backend saves (season-box.json).
+const P = { id: 0, name: 1, team: 2, pos: 3, g: 4, a: 5, pm: 6, sog: 7, hit: 8, blk: 9, pim: 10, toi: 11, fo: 12, ppg: 13, gv: 14, tk: 15 };
+const GK = { id: 0, name: 1, team: 2, sa: 3, sv: 4, ga: 5, toi: 6, dec: 7 };
+const CONF = { ANA: 'W', BOS: 'E', BUF: 'E', CAR: 'E', CBJ: 'E', CGY: 'W', CHI: 'W', COL: 'W', DAL: 'W', DET: 'E', EDM: 'W', FLA: 'E', LAK: 'W', MIN: 'W', MTL: 'E', NJD: 'E', NSH: 'W', NYI: 'E', NYR: 'E', OTT: 'E', PHI: 'E', PIT: 'E', SEA: 'W', SJS: 'W', STL: 'W', TBL: 'E', TOR: 'E', UTA: 'W', VAN: 'W', VGK: 'W', WPG: 'W', WSH: 'E' };
+// Game Score from the box score (a simplified Luszczyszyn Game Score: the NHL box score has no primary/secondary
+// assists, penalties drawn or shot attempts, so assists share one weight and plus/minus stands in for on-ice goals).
+const gameScore = (r) => 0.75 * r[P.g] + 0.625 * r[P.a] + 0.075 * r[P.sog] + 0.05 * r[P.blk] - 0.075 * r[P.pim] + 0.15 * r[P.pm];
+const goalieScore = (r) => -0.75 * r[GK.ga] + 0.1 * r[GK.sv];
+const seasonBox = () => { const b = get('seasonbox'); return Array.isArray(b) ? b : null; };
+// Form: a rolling estimate of current level (Kalman filter over each game's Game Score, like NBADash's DARKO-style
+// number). FORM_Q is how fast true form can change, FORM_R how noisy one game is; tuned for hockey's low scoring.
+const FORM_Q = 0.015, FORM_R = 0.85, FORM_PRIOR = 0.45;
+let seasonCache = { src: null, val: null };
+function seasonStats() {
+  const games = seasonBox();
+  if (!games) return null;
+  if (seasonCache.src === games) return seasonCache.val;
+  const sk = new Map(), gk = new Map(), teamGp = {};
+  const sorted = games.filter((g) => g.type >= 2).slice().sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  let lgSa = 0, lgSv = 0;
+  for (const g of sorted) {
+    teamGp[g.away.a] = (teamGp[g.away.a] || 0) + 1; teamGp[g.home.a] = (teamGp[g.home.a] || 0) + 1;
+    for (const r of g.p) {
+      let x = sk.get(r[P.id]);
+      if (!x) sk.set(r[P.id], x = { id: r[P.id], name: r[P.name], team: r[P.team], pos: r[P.pos], gp: 0, g: 0, a: 0, pts: 0, pm: 0, sog: 0, hit: 0, blk: 0, pim: 0, toi: 0, ppg: 0, gv: 0, tk: 0, gs: 0, form: FORM_PRIOR, fP: 1, log: [] });
+      const gs = gameScore(r);
+      x.team = r[P.team]; x.gp++; x.g += r[P.g]; x.a += r[P.a]; x.pts += r[P.g] + r[P.a]; x.pm += r[P.pm]; x.sog += r[P.sog]; x.hit += r[P.hit]; x.blk += r[P.blk]; x.pim += r[P.pim]; x.toi += r[P.toi]; x.ppg += r[P.ppg]; x.gv += r[P.gv]; x.tk += r[P.tk]; x.gs += gs;
+      x.fP += FORM_Q; const K = x.fP / (x.fP + FORM_R); x.form += K * (gs - x.form); x.fP *= 1 - K;
+      x.log.push({ id: g.id, date: g.date, gs });
+    }
+    for (const r of g.g) {
+      let x = gk.get(r[GK.id]);
+      if (!x) gk.set(r[GK.id], x = { id: r[GK.id], name: r[GK.name], team: r[GK.team], gp: 0, w: 0, l: 0, o: 0, sa: 0, sv: 0, ga: 0, toi: 0, gs: 0 });
+      x.team = r[GK.team]; x.gp++; x.sa += r[GK.sa]; x.sv += r[GK.sv]; x.ga += r[GK.ga]; x.toi += r[GK.toi]; x.gs += goalieScore(r);
+      if (r[GK.dec] === 'W') x.w++; else if (r[GK.dec] === 'L') { if (['OT', 'SO'].includes(g.last)) x.o++; else x.l++; } else if (r[GK.dec] === 'O') x.o++;
+      lgSa += r[GK.sa]; lgSv += r[GK.sv];
+    }
+  }
+  const lgSvp = lgSa ? lgSv / lgSa : 0.9;
+  for (const x of sk.values()) { x.ppgp = x.pts / x.gp; x.gsAvg = x.gs / x.gp; x.toiAvg = x.toi / x.gp; x.shp = x.sog ? x.g / x.sog : 0; x.teamGp = teamGp[x.team] || x.gp; }
+  for (const x of gk.values()) { x.svp = x.sa ? x.sv / x.sa : 0; x.gaa = x.toi ? x.ga * 3600 / x.toi : 0; x.gsaa = lgSvp * x.sa - x.ga; x.teamGp = teamGp[x.team] || x.gp; }
+  const val = { skaters: [...sk.values()], goalies: [...gk.values()], teamGp, lgSvp, games: sorted.length };
+  seasonCache = { src: games, val };
+  return val;
+}
+const showForm = () => { try { return localStorage.getItem('nhldash.showForm') !== '0'; } catch { return true; } };
+dataToggles.push({ id: 'set-form', label: 'Show Form', hint: 'A rolling form number on Leaders and player pages, from the saved box scores.', get: showForm, set: (v) => { try { localStorage.setItem('nhldash.showForm', v ? '1' : '0'); } catch { } } });
+const formChip = (x) => {
+  if (!showForm() || !x || x.form == null) return '';
+  const d = x.form - x.gsAvg;
+  return `<span class="formchip ${d >= 0 ? 'up' : 'down'}" data-gloss="Form" title="">Form ${x.form.toFixed(2)}</span>`;
+};
+
+
+// Players of the week: best 3 and worst 3 by average Game Score, East and West. The worst list only counts regulars
+// (14+ minutes a game and at least half their team's games that week).
+function playersOfWeek(monday) {
+  const games = seasonBox();
+  if (!games) return '<p class="muted small">Sync the season with box scores to see the players of the week.</p>';
+  const end = shiftDate(monday, 7);
+  const wk = games.filter((g) => g.type >= 2 && g.date >= monday && g.date < end);
+  if (!wk.length) return '';
+  const teamG = {}, pl = new Map();
+  for (const g of wk) {
+    teamG[g.away.a] = (teamG[g.away.a] || 0) + 1; teamG[g.home.a] = (teamG[g.home.a] || 0) + 1;
+    for (const r of g.p) { let x = pl.get(r[P.id]); if (!x) pl.set(r[P.id], x = { id: r[P.id], name: r[P.name], team: r[P.team], pos: r[P.pos], gp: 0, gs: 0, toi: 0, g: 0, a: 0 }); x.gp++; x.gs += gameScore(r); x.toi += r[P.toi]; x.g += r[P.g]; x.a += r[P.a]; }
+  }
+  const all = [...pl.values()].map((x) => ({ ...x, avg: x.gs / x.gp }));
+  const card = (conf) => {
+    const c = all.filter((x) => CONF[x.team] === conf);
+    const best = c.filter((x) => x.gp >= Math.min(2, teamG[x.team])).sort((a, b) => b.avg - a.avg).slice(0, 3);
+    const worst = c.filter((x) => x.toi / x.gp >= 840 && x.gp >= teamG[x.team] / 2).sort((a, b) => a.avg - b.avg).slice(0, 3);
+    const li = (x) => `<li>${logo(x.team, 'slogo')}<span class="l">${plink(x.id, `<b>${esc(x.name)}</b>`)} <span class="muted small">${esc(x.team)} &middot; ${x.gp} GP &middot; ${x.g} G ${x.a} A</span></span><b class="v">${x.avg.toFixed(2)}</b></li>`;
+    return `<section class="card"><h2>${conf === 'E' ? 'Eastern' : 'Western'} Conference</h2><h3 class="sub">Best</h3><ol class="lead">${best.map(li).join('')}</ol><h3 class="sub">Worst</h3><ol class="lead">${worst.map(li).join('') || '<li class="muted">Not enough games.</li>'}</ol></section>`;
+  };
+  return `<h3 class="sub">Players of the week <span class="muted small">average <span class="hint" data-gloss="Game score">Game Score</span></span></h3><div class="grid two powgrid">${card('E')}${card('W')}</div>`;
+}
+
+// Players of the game: top 3 by Game Score from this game's box score.
+function playersOfGame(b) {
+  const rows = [];
+  for (const side of ['awayTeam', 'homeTeam']) {
+    const t = b.playerByGameStats?.[side]; if (!t) continue;
+    for (const p of [...(t.forwards || []), ...(t.defense || [])]) rows.push({ id: p.playerId, name: nm(p.name), team: b[side].abbrev, line: `${p.goals} G, ${p.assists} A, ${p.sog} SOG`, gs: gameScore([p.playerId, '', '', '', p.goals, p.assists, p.plusMinus, p.sog, p.hits, p.blockedShots, p.pim]) });
+    for (const g of t.goalies || []) if (g.toi && g.toi !== '00:00') rows.push({ id: g.playerId, name: nm(g.name), team: b[side].abbrev, line: `${g.saves} saves on ${g.shotsAgainst}`, gs: goalieScore([0, '', '', g.shotsAgainst, g.saves, g.goalsAgainst]) });
+  }
+  const top = rows.sort((a, b2) => b2.gs - a.gs).slice(0, 3);
+  if (!top.length) return '';
+  return `<section class="card wide"><h2>Players of the game <span class="muted small"><span class="hint" data-gloss="Game score">Game Score</span></span></h2><div class="pog">${top.map((x, i) => `<a class="pogc${i === 0 ? ' first' : ''}" href="#/player/${x.id}"><span class="pogr">${['1st', '2nd', '3rd'][i]} star</span>${logo(x.team, 'glogo')}<b>${esc(x.name)}</b><small class="muted">${esc(x.team)} &middot; ${esc(x.line)}</small><span class="pogv">${x.gs.toFixed(2)}</span></a>`).join('')}</div></section>`;
+}
+
+// ------------------------------------------------------------------ leaderboards (Leaders and Losers, card or row view)
+// Qualifying minimums follow the NHL's: rate stats need half of the team's games (skaters) or 30% of them in goal
+// (the NHL's 25 of 82 games). Losers use a fairness sample: 14+ minutes a game and half the team's games.
+let ldTab = 'leaders';
+let ldView = (() => { try { return localStorage.getItem('nhldash.ldView') || 'cards'; } catch { return 'cards'; } })();
+const LD_SK = [
+  ['Points', 'pts', 'count'], ['Goals', 'g', 'count'], ['Assists', 'a', 'count'], ['Points per game', 'ppgp', 'rate', 2],
+  ['Plus/minus', 'pm', 'count'], ['Shots on goal', 'sog', 'count'], ['Power-play goals', 'ppg', 'count'],
+  ['Hits', 'hit', 'count'], ['Blocked shots', 'blk', 'count'], ['Takeaways', 'tk', 'count'], ['Game score per game', 'gsAvg', 'rate', 2], ['Form', 'form', 'rate', 2]];
+const LD_GK = [['Wins', 'w', 'count'], ['Save %', 'svp', 'grate', 3], ['Goals against avg.', 'gaa', 'grate', 2, true], ['Goals saved above average', 'gsaa', 'count', 1]];
+const LS_SK = [['Worst plus/minus', 'pm', 'fair', 0, true], ['Most giveaways', 'gv', 'fair'], ['Most penalty minutes', 'pim', 'fair'], ['Lowest game score per game', 'gsAvg', 'fair', 2, true], ['Coldest Form', 'form', 'fair', 2, true]];
+const LS_GK = [['Worst save %', 'svp', 'grate', 3, true], ['Highest goals against avg.', 'gaa', 'grate', 2], ['Most regulation losses', 'l', 'count'], ['Fewest goals saved above average', 'gsaa', 'grate', 1, true]];
+function topList(rows, key, kind, asc) {
+  const ok = rows.filter((x) => kind === 'rate' ? x.gp >= Math.max(3, x.teamGp / 2) : kind === 'grate' ? x.gp >= Math.max(2, x.teamGp * 0.3) : kind === 'fair' ? x.gp >= Math.max(3, x.teamGp / 2) && (x.toiAvg ?? 9999) >= 840 : x.gp > 0);
+  return ok.filter((x) => kind !== 'count' || asc || x[key] > 0).sort((a, b) => (asc ? a[key] - b[key] : b[key] - a[key]) || a.gp - b.gp).slice(0, 5);
+}
+function fmtV(v, dec, key) { if (dec == null) return (key === 'pm' && v > 0 ? '+' : '') + v; const s = v.toFixed(dec); return dec === 3 ? s.replace(/^0/, '') : (key === 'gsaa' && v > 0 ? '+' + s : s); }
+function leaderCard([title, key, kind, dec, asc], rows, goalie) {
+  const list = topList(rows, key, kind, asc);
+  if (!list.length) return '';
+  // "Games played edge": a close race where the leader got there in fewer games.
+  let edge = '';
+  if (kind === 'count' && list[1] && !goalie && list[0][key] - list[1][key] <= 1 && list[0].gp < list[1].gp) edge = `<span class="gpedge" data-gloss="GP edge">in ${list[1].gp - list[0].gp} fewer games</span>`;
+  const items = list.map((x, i) => `<li><span class="rk">${i + 1}</span>${logo(x.team, 'slogo')}<span class="l">${plink(x.id, `<b>${esc(x.name)}</b>`)} <span class="muted small">${esc(x.team)}${x.pos ? ' &middot; ' + esc(x.pos) : ''} &middot; ${x.gp} GP</span>${i === 0 ? edge : ''}</span><b class="v">${fmtV(x[key], dec, key)}</b></li>`).join('');
+  return ldView === 'rows'
+    ? `<tr><th class="l" colspan="2">${esc(title)}</th></tr>${list.map((x, i) => `<tr><td class="l">${i + 1}. ${logo(x.team, 'slogo')} ${plink(x.id, esc(x.name))} <span class="muted small">${esc(x.team)} &middot; ${x.gp} GP</span></td><td><b>${fmtV(x[key], dec, key)}</b></td></tr>`).join('')}`
+    : `<section class="card"><h2>${esc(title)}</h2><ol class="lead">${items}</ol></section>`;
+}
 views.leaders = () => {
+  routeKeys = [];
+  const ss = seasonStats();
+  const tabs = `<div class="segs bar1" role="tablist"><button type="button" role="tab" aria-selected="${ldTab === 'leaders'}" class="seg${ldTab === 'leaders' ? ' on' : ''}" data-ldtab="leaders">Leaders</button><button type="button" role="tab" aria-selected="${ldTab === 'losers'}" class="seg${ldTab === 'losers' ? ' on' : ''}" data-ldtab="losers">Losers</button>
+    <span class="segsep"></span><button type="button" class="seg${ldView === 'cards' ? ' on' : ''}" data-ldview="cards">Cards</button><button type="button" class="seg${ldView === 'rows' ? ' on' : ''}" data-ldview="rows">Rows</button>
+    <span class="muted small push">${ss ? `From ${ss.games} saved games &middot; <span class="hint" data-gloss="Qualifying">who qualifies</span>` : 'Official NHL leaders. Sync the season (with box scores) for Losers, Form and more categories.'}</span></div>`;
+  if (!ss) return tabs + officialLeaders();
+  const sk = LD_SK.filter((c) => c[1] !== 'form' || showForm()), lsk = LS_SK.filter((c) => c[1] !== 'form' || showForm());
+  const cats = ldTab === 'leaders' ? [[sk, ss.skaters, false], [LD_GK, ss.goalies, true]] : [[lsk, ss.skaters, false], [LS_GK, ss.goalies, true]];
+  if (ldView === 'rows') return tabs + `<div class="grid two">${cats.map(([list, rows, gk]) => `<section class="card"><h2>${gk ? 'Goalies' : 'Skaters'}</h2><table class="tbl ldrows"><tbody>${list.map((c) => leaderCard(c, rows, gk)).join('')}</tbody></table></section>`).join('')}</div>`;
+  return tabs + cats.map(([list, rows, gk]) => `<h3 class="sub">${gk ? 'Goalies' : 'Skaters'}</h3><div class="grid three ldcards">${list.map((c) => leaderCard(c, rows, gk)).join('')}</div>`).join('');
+};
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-ldtab]'); if (t) { ldTab = t.dataset.ldtab; render(); return; }
+  const v = e.target.closest('[data-ldview]'); if (v) { ldView = v.dataset.ldview; try { localStorage.setItem('nhldash.ldView', ldView); } catch { } render(); }
+});
+const leaderNames = { points: 'Points', goals: 'Goals', assists: 'Assists', plusMinus: 'Plus/minus', wins: 'Wins', savePctg: 'Save %', goalsAgainstAverage: 'Goals against avg.', shutouts: 'Shutouts' };
+function officialLeaders() {
   routeKeys = ['leaders', 'goalies'];
   want('leaders'); want('goalies');
   const block = (key) => {
     const d = get(key);
     if (!d) return `<section class="card">${status(key)}</section>`;
-    return Object.keys(leaderNames).filter((c) => d[c]).map((c) => `<section class="card"><h2>${leaderNames[c]}</h2><ol class="lead">${d[c].map((p, i) => {
+    return Object.keys(leaderNames).filter((c) => d[c]).map((c) => `<section class="card"><h2>${leaderNames[c]}</h2><ol class="lead">${d[c].slice(0, 5).map((p, i) => {
       const v = c === 'savePctg' ? p.value.toFixed(3).replace(/^0/, '') : c === 'goalsAgainstAverage' ? p.value.toFixed(2) : (c === 'plusMinus' && p.value > 0 ? '+' : '') + p.value;
       return `<li><span class="rk">${i + 1}</span>${logo(p.teamAbbrev, 'slogo')}<span class="l">${plink(p.id, `${esc(nm(p.firstName))} <b>${esc(nm(p.lastName))}</b>`)} <span class="muted small">${esc(p.teamAbbrev)} &middot; ${esc(p.position)}</span></span><b class="v">${v}</b></li>`;
     }).join('')}</ol></section>`).join('');
   };
   return `<div class="grid three">${block('leaders')}${block('goalies')}</div>`;
-};
+}
 
 // ------------------------------------------------------------------ advanced (MoneyPuck, opt-in)
 let adv = { sit: 'all', sort: { teams: 'xGoalsPercentage', skaters: 'I_F_xGoals', goalies: 'gsax' }, dir: { teams: -1, skaters: -1, goalies: -1 } };
@@ -384,7 +522,6 @@ const teamColor = (k) => `#${COLORS[k] || '6b7280'}`;
 const TEAMS = { ANA: 'Anaheim Ducks', BOS: 'Boston Bruins', BUF: 'Buffalo Sabres', CAR: 'Carolina Hurricanes', CBJ: 'Columbus Blue Jackets', CGY: 'Calgary Flames', CHI: 'Chicago Blackhawks', COL: 'Colorado Avalanche', DAL: 'Dallas Stars', DET: 'Detroit Red Wings', EDM: 'Edmonton Oilers', FLA: 'Florida Panthers', LAK: 'Los Angeles Kings', MIN: 'Minnesota Wild', MTL: 'Montreal Canadiens', NJD: 'New Jersey Devils', NSH: 'Nashville Predators', NYI: 'New York Islanders', NYR: 'New York Rangers', OTT: 'Ottawa Senators', PHI: 'Philadelphia Flyers', PIT: 'Pittsburgh Penguins', SEA: 'Seattle Kraken', SJS: 'San Jose Sharks', STL: 'St. Louis Blues', TBL: 'Tampa Bay Lightning', TOR: 'Toronto Maple Leafs', UTA: 'Utah Mammoth', VAN: 'Vancouver Canucks', VGK: 'Vegas Golden Knights', WPG: 'Winnipeg Jets', WSH: 'Washington Capitals' };
 // Settings: General / Data / Sync tabs, like NBADash (tab remembered).
 let setTab = (() => { try { return localStorage.getItem('nhldash.setTab') || 'general'; } catch { return 'general'; } })();
-const dataToggles = [];   // other features add { id, key, label, hint } here (Form, standings moves)
 let syncInfo = null, schedInfo = null;
 views.settings = () => {
   routeKeys = [];
@@ -669,7 +806,9 @@ views.player = (id) => {
       ? `<td>${car.gamesPlayed}</td><td>${car.wins}</td><td>${car.losses}</td><td>${car.otLosses}</td><td>${car.goalsAgainstAvg?.toFixed(2)}</td><td>${p3(car.savePctg)}</td><td>${car.shutouts}</td>`
       : `<td>${car.gamesPlayed}</td><td>${car.goals}</td><td>${car.assists}</td><td><b>${car.points}</b></td><td>${car.plusMinus > 0 ? '+' : ''}${car.plusMinus}</td><td>${car.powerPlayGoals}</td><td>${car.shots}</td><td>${car.shootingPctg != null ? (car.shootingPctg * 100).toFixed(1) : ''}</td><td>${esc(car.avgToi || '')}</td>`}</tr>` : ''}</tbody></table></div>`;
 
-  return head + `<section class="card wide"><h2>This season</h2>${season}${mp}</section>
+  const sx = seasonStats()?.skaters.find((x) => String(x.id) === String(id));
+  const formLine = sx && showForm() ? `<div class="formline">${formChip(sx)} <span class="muted small">season Game Score ${sx.gsAvg.toFixed(2)} a game &middot; last 5: ${sx.log.slice(-5).map((l) => `<a class="tlink" href="#/game/${l.id}">${l.gs.toFixed(1)}</a>`).join(' ')}</span></div>` : '';
+  return head + `<section class="card wide"><h2>This season</h2>${season}${formLine}${mp}</section>
     <section class="card wide"><h2>Game log</h2>${logTbl}</section>
     <section class="card wide"><h2>NHL career <span class="muted small">regular season</span></h2>${career}</section>`;
 };
@@ -763,6 +902,7 @@ views.week = (n) => {
     return `<a class="sline" href="#/game/${g.id}">${logo(g.awayTeam.abbrev, 'slogo')}<span class="${fin && aw ? 'b' : ''}">${esc(g.awayTeam.abbrev)} ${fin ? g.awayTeam.score : ''}</span><span class="muted">@</span>${logo(g.homeTeam.abbrev, 'slogo')}<span class="${fin && !aw ? 'b' : ''}">${esc(g.homeTeam.abbrev)} ${fin ? g.homeTeam.score : ''}</span><span class="sres muted">${esc(gameStatus(g))}</span></a>`;
   };
   return `<div class="datebar"><a class="btn sq" href="#/week/${n - 1}" aria-label="Previous week"${n <= 1 ? ' hidden' : ''}>&lsaquo;</a><strong>Week ${n} &middot; ${esc(weekRange(w.monday))}</strong><a class="btn sq" href="#/week/${n + 1}" aria-label="Next week"${weekList().some((x) => x.n === n + 1) ? '' : ' hidden'}>&rsaquo;</a></div>
+    ${playersOfWeek(w.monday)}
     <div class="grid two"><section class="card"><h2>Games</h2>${days.map((d) => `<h3 class="sub">${esc(niceDate(d.date))}</h3>${d.games.filter((g) => g.gameType >= 2).map(gameRow).join('')}`).join('') || '<p class="muted">No games.</p>'}</section>
       <section class="card"><h2>Team records this week</h2>${table.length ? `<table class="tbl"><thead><tr><th class="l">Team</th><th>W</th><th>L</th><th>OTL</th><th>GF</th><th>GA</th></tr></thead><tbody>${table.map(([k, r]) => `<tr class="${favs().has(k) ? 'fav' : ''}"><td class="l"><a class="tlink" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a></td><td>${r.w}</td><td>${r.l}</td><td>${r.o}</td><td>${r.gf}</td><td>${r.ga}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No finished games yet.</p>'}</section></div>`;
 };
@@ -1116,6 +1256,12 @@ const GLOSS = {
   'HD shots': 'High-danger shots faced (20%+ chance to score). Source: MoneyPuck.',
   'HD GA': 'Goals allowed on high-danger shots. Source: MoneyPuck.',
   'Game score': 'Dom Luszczyszyn\'s single-number game rating, averaged by MoneyPuck: goals, assists, shots, blocks, penalties, faceoffs and on-ice shot and goal differences, weighted.',
+  'Game score': 'Game Score (box score version): 0.75 x goals + 0.625 x assists + 0.075 x shots on goal + 0.05 x blocked shots - 0.075 x penalty minutes + 0.15 x plus/minus. Goalies: 0.1 x saves - 0.75 x goals against. Based on Dom Luszczyszyn\'s Game Score; the NHL box score has no primary assists, penalties drawn or shot attempts, so those parts are simplified.',
+  'Game score per game': 'Average Game Score per game played (see Game Score).',
+  Form: 'Form: a rolling estimate of a player\'s current level, updated after every game from its Game Score with a Kalman filter (like the DARKO-style form number in NBADash). Recent games count most, one odd game moves it only a little. Green: above the player\'s season average; red: below.',
+  'GP edge': 'Games played edge: the race is close and the leader got there in fewer games.',
+  Qualifying: 'Who qualifies: rate stats (points per game, Game Score per game, Form) need half of the team\'s games; goalie save % and GAA need 30% of the team\'s games (the NHL\'s 25 of 82). Losers only count regulars: 14+ minutes a game and half the team\'s games.',
+  'Goals saved above average': 'Goals saved above average: (league save % x shots faced) - goals allowed, from the saved box scores. Positive is better than an average goalie.',
   'P%': 'Points percentage: points earned / points possible (2 per game).',
   RW: 'Regulation wins: the first tiebreaker in the standings.',
   'GD/GP': 'Goal difference per game played.',
@@ -1354,7 +1500,7 @@ const RECENT_KEY = 'nhldash.recent';
 const recents = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; } catch { return []; } };
 const remember = (it) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([{ label: it.label, sub: it.sub, href: it.href, logo: it.logo }, ...recents().filter((r) => r.href !== it.href)].slice(0, 6))); } catch { } };
 const fold = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-const extraPlayers = [];          // other modules push functions that return [{ id, name, team, pos }]
+const extraPlayers = [() => (seasonStats()?.skaters || []).map((x) => ({ id: x.id, name: x.name, team: x.team, pos: x.pos })).concat((seasonStats()?.goalies || []).map((x) => ({ id: x.id, name: x.name, team: x.team, pos: 'G' })))];          // other modules push functions that return [{ id, name, team, pos }]
 function searchIndex() {
   const out = Object.entries(TEAMS).map(([k, v]) => ({ label: v, sub: `${k} · team`, href: `#/team/${k}`, text: fold(`${v} ${k}`), logo: k }));
   for (const g of get(`score:${today()}`)?.games || []) out.push({ label: `${g.awayTeam.abbrev} @ ${g.homeTeam.abbrev}`, sub: `today · ${gameStatus(g)}`, href: `#/game/${g.id}`, text: fold(`${g.awayTeam.abbrev} ${g.homeTeam.abbrev} ${nm(g.awayTeam.name)} ${nm(g.homeTeam.name)} today game`), logo: g.homeTeam.abbrev });
