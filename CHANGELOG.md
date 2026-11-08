@@ -6,6 +6,19 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.5.0 (2026-11-08)
+
+**Feature**
+- Search like NBADash: local first, NHL player search for the rest, keyboard choose, grey completion, recent searches; `/` focuses search.
+- Settings in General, Data and Sync tabs; season sync also saves box scores and resumes; opt-in nightly sync.
+- Leaders and Losers with card or row view and qualifying minimums; Game Score and Form; players of the week and of the game.
+- Team rating, report card grades, team grade and remaining-schedule squares, opt-in standings moves, fuller Eastern-Western Report.
+- Rookie score with podium and draft info, compare up to 5 players, free agent sort/notes/signed notice, transaction tags, team moves, roster tags, player pictures.
+- Live cards show the last goal and END-of-period breaks.
+
+**Housekeeping**
+- Hover cards with formulas and keyboard access; browser preview; ARCHITECTURE.md.
+
 ## 0.4.3 (2026-10-30)
 
 **Bug/Fix**
