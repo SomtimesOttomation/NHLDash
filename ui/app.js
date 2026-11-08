@@ -96,7 +96,7 @@ function periodLabel(pd) {
 function gameStatus(g) {
   if (isLive(g)) {
     const c = g.clock || {};
-    if (c.inIntermission) return `${periodLabel(g.periodDescriptor)} INT`;
+    if (c.inIntermission) return `END ${periodLabel(g.periodDescriptor)}`;
     return `${periodLabel(g.periodDescriptor)} ${c.timeRemaining || ''}`.trim();
   }
   if (isFinal(g)) {
@@ -137,7 +137,8 @@ views.scores = (date) => {
       return `<div class="gteam${win ? ' win' : ''}${lose ? ' lose' : ''}${fav.has(t.abbrev) ? ' fav' : ''}"><span class="gside">${logo(t.abbrev, 'glogo')}<span class="gnames"><b>${esc(t.abbrev)}</b><small class="muted">${esc(sub)}</small></span></span>${fut ? '' : `<span class="gsc"><b class="sc">${t.score ?? 0}</b><small class="muted">${t.sog != null ? t.sog + ' SOG' : ''}</small></span>`}</div>`;
     };
     return `<a class="card game${live ? ' live' : ''}${fav.has(g.awayTeam.abbrev) || fav.has(g.homeTeam.abbrev) ? ' fav' : ''}" href="#/game/${g.id}" id="game-${g.id}">
-      <div class="gstat${live ? ' on' : ''}">${esc(gameStatus(g))}</div>${row(g.awayTeam, g.homeTeam)}${row(g.homeTeam, g.awayTeam)}
+      <div class="gstat${live ? ' on' : ''}">${esc(gameStatus(g))}${fav.has(g.awayTeam.abbrev) || fav.has(g.homeTeam.abbrev) ? '<span class="gfav" aria-label="Favourite">\u2605</span>' : ''}</div>${row(g.awayTeam, g.homeTeam)}${row(g.homeTeam, g.awayTeam)}
+      ${live && g.goals?.length ? (() => { const lg = g.goals.at(-1); return `<div class="glast"><span class="muted">Last goal</span> <b>${esc(nm(lg.name) || `${nm(lg.firstName)} ${nm(lg.lastName)}`)}</b> ${esc(lg.teamAbbrev?.default || lg.teamAbbrev || '')} &middot; ${esc(periodLabel(lg.periodDescriptor))} ${esc(lg.timeInPeriod || '')}</div>`; })() : ''}
       <div class="gmeta">${esc(nm(g.venue))}${g.tvBroadcasts?.length ? ' &middot; ' + esc(g.tvBroadcasts.map((b) => b.network).join(', ')) : ''}</div></a>`;
   }).join('');
   const d0 = new Date(date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
@@ -1255,6 +1256,9 @@ document.addEventListener('keydown', (e) => {
   if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); }
   if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); history.forward(); }
   if (e.key === 'F5') { e.preventDefault(); $('btn-refresh').click(); }
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+  if (e.key === '/' && !typing && !e.ctrlKey && !e.altKey) { e.preventDefault(); $('psearch').focus(); }
+  if (e.key === 'Escape' && parseRoute().view === 'settings' && !typing && $('dialog').hidden) location.hash = '#/';
   if (e.key === 'Escape' && !$('dialog').hidden) $('dialog-cancel').click();
   if (e.key === 'Escape' && !$('upd').hidden) $('upd').hidden = true;
 });
@@ -1281,31 +1285,94 @@ $('btn-refresh').addEventListener('click', async () => {
   const iv = setInterval(() => { if (!routeKeys.some((k) => store.get(k)?.loading) || Date.now() - t0 > 20000) { clearInterval(iv); stop(); } }, 200);
 });
 
-// Search: teams (go to standings) and players from whatever is loaded (MoneyPuck list, leaders, open box scores).
+// Search (NBADash behaviour): local index first (teams, today's games, every player NHLDash has loaded or saved),
+// then the NHL's player search only when that finds fewer than 3 (3+ letters, 450 ms after typing stops).
+// Up/Down choose, Enter opens, Tab or Right accepts the grey completion, Esc clears, "/" focuses.
 const res = $('psearch-results');
+const RECENT_KEY = 'nhldash.recent';
+const recents = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; } catch { return []; } };
+const remember = (it) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([{ label: it.label, sub: it.sub, href: it.href, logo: it.logo }, ...recents().filter((r) => r.href !== it.href)].slice(0, 6))); } catch { } };
+const fold = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const extraPlayers = [];          // other modules push functions that return [{ id, name, team, pos }]
 function searchIndex() {
-  const out = Object.entries(TEAMS).map(([k, v]) => ({ label: `${v} (${k})`, href: `#/team/${k}`, text: `${v} ${k}`.toLowerCase() }));
-  const sc = get(`score:${today()}`);
-  for (const g of sc?.games || []) {
-    const lbl = `${g.awayTeam.abbrev} @ ${g.homeTeam.abbrev}, today ${gameStatus(g)}`;
-    out.push({ label: lbl, href: `#/game/${g.id}`, text: `${g.awayTeam.abbrev} ${g.homeTeam.abbrev} ${nm(g.awayTeam.name)} ${nm(g.homeTeam.name)} today game`.toLowerCase() });
-  }
+  const out = Object.entries(TEAMS).map(([k, v]) => ({ label: v, sub: `${k} · team`, href: `#/team/${k}`, text: fold(`${v} ${k}`), logo: k }));
+  for (const g of get(`score:${today()}`)?.games || []) out.push({ label: `${g.awayTeam.abbrev} @ ${g.homeTeam.abbrev}`, sub: `today · ${gameStatus(g)}`, href: `#/game/${g.id}`, text: fold(`${g.awayTeam.abbrev} ${g.homeTeam.abbrev} ${nm(g.awayTeam.name)} ${nm(g.homeTeam.name)} today game`), logo: g.homeTeam.abbrev });
   const seen = new Set();
-  const add = (name, team, href) => { if (!name || seen.has(name)) return; seen.add(name); out.push({ label: `${name} · ${team}`, href, text: name.toLowerCase() }); };
-  for (const c of Object.values(get('leaders') || {})) for (const p of c) add(`${nm(p.firstName)} ${nm(p.lastName)}`, p.teamAbbrev, `#/player/${p.id}`);
-  for (const [k, v] of store) if (k.startsWith('team:') && v.body) for (const p of [...(v.body.skaters || []), ...(v.body.goalies || [])]) add(`${nm(p.firstName)} ${nm(p.lastName)}`, k.slice(5), `#/player/${p.playerId}`);
-  for (const r of get('mp:skaters') || []) if (r.situation === 'all') add(r.name, r.team, `#/player/${r.playerId}`);
-  return out;
+  const add = (id, name, team, pos) => { if (!id || !name || seen.has(String(id))) return; seen.add(String(id)); out.push({ label: name, sub: [team, pos].filter(Boolean).join(' · '), href: `#/player/${id}`, text: fold(name), logo: team, player: true }); };
+  for (const c of Object.values(get('leaders') || {})) for (const p of c) add(p.id, `${nm(p.firstName)} ${nm(p.lastName)}`, p.teamAbbrev, p.position);
+  for (const [k, v] of store) if (k.startsWith('team:') && v.body) for (const p of [...(v.body.skaters || []), ...(v.body.goalies || [])]) add(p.playerId, `${nm(p.firstName)} ${nm(p.lastName)}`, k.slice(5), p.positionCode || 'G');
+  for (const r of get('rookies')?.data || []) add(r.playerId, r.skaterFullName, r.teamAbbrevs, r.positionCode);
+  for (const r of get('mp:skaters') || []) if (r.situation === 'all') add(r.playerId, r.name, r.team, r.position);
+  for (const f of extraPlayers) for (const p of f()) add(p.id, p.name, p.team, p.pos);
+  return { out, seen };
 }
-$('psearch').addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  if (!q) { res.hidden = true; return; }
-  const hits = searchIndex().filter((x) => x.text.includes(q)).slice(0, 12);
-  res.innerHTML = hits.length ? hits.map((x) => `<a href="${x.href}">${esc(x.label)}</a>`).join('') : '<div class="empty">No matches</div>';
+let sItems = [], sActive = -1, remoteQ = '', remoteTimer = 0;
+const sInput = $('psearch'), sGhost = $('psearch-ghost');
+function sMatch(q) {
+  const { out, seen } = searchIndex();
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  const hit = (x) => words.every((w) => x.text.split(/\s+/).some((t) => t.startsWith(w)) || (w.length > 2 && x.text.includes(w)));
+  const local = out.filter(hit).sort((a, b) => (fold(b.label).startsWith(fold(q)) - fold(a.label).startsWith(fold(q))) || (!!a.player - !!b.player)).slice(0, 10);
+  const r = get(`psearch:${fold(q).trim()}`);
+  const remote = (Array.isArray(r) ? r : []).filter((p) => !seen.has(String(p.playerId))).slice(0, 8)
+    .map((p) => ({ label: p.name, sub: [p.teamAbbrev || p.lastTeamAbbrev, p.positionCode, p.active ? '' : 'retired'].filter(Boolean).join(' · '), href: `#/player/${p.playerId}`, logo: p.teamAbbrev, remote: true }));
+  return { local, remote };
+}
+function hl(label, q) {
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  const f = fold(label);
+  if (f.length !== label.length) return esc(label);
+  let outS = '', i = 0;
+  while (i < label.length) {
+    const w = words.find((x) => f.startsWith(x, i) && (i === 0 || f[i - 1] === ' '));
+    if (w) { outS += `<mark>${esc(label.slice(i, i + w.length))}</mark>`; i += w.length; } else { outS += esc(label[i]); i++; }
+  }
+  return outS;
+}
+function sDraw() {
+  const q = sInput.value.trim();
+  const row = (it, i) => `<li class="ps-row${i === sActive ? ' active' : ''}" role="option" data-i="${i}">${it.logo ? logo(it.logo, 'slogo') : '<span class="slogo"></span>'}<span class="ps-name"><b>${hl(it.label, q)}</b><small>${esc(it.sub || '')}</small></span></li>`;
+  if (!q) {
+    const rec = recents();
+    sGhost.textContent = '';
+    if (!rec.length || document.activeElement !== sInput) { res.hidden = true; return; }
+    sItems = rec;
+    res.innerHTML = `<ul role="listbox"><li class="ps-note ps-recent-head"><span>Recent</span><button class="ps-clear" type="button" id="ps-clear">Clear</button></li>${rec.map(row).join('')}</ul>`;
+    res.hidden = false; return;
+  }
+  const { local, remote } = sMatch(q);
+  sItems = [...local, ...remote];
+  const loading = store.get(`psearch:${fold(q)}`)?.loading;
+  const top = sItems[0];
+  sGhost.innerHTML = top && fold(top.label).startsWith(fold(q)) && top.label.length > q.length && fold(q).length === q.length ? `<span style="visibility:hidden">${esc(q)}</span>${esc(top.label.slice(q.length))}` : '';
+  res.innerHTML = `<ul role="listbox">${sItems.map(row).join('') || `<li class="ps-empty">${loading ? 'Searching the NHL...' : q.length < 2 ? 'Keep typing...' : 'No matches'}</li>`}${sItems.length && loading ? '<li class="ps-empty">Searching the NHL for more...</li>' : ''}${local.length && remote.length ? '' : ''}</ul>`;
   res.hidden = false;
+}
+function sGo(it) { if (!it) return; remember(it); sInput.value = ''; sGhost.textContent = ''; res.hidden = true; sInput.blur(); location.hash = it.href; }
+function sAskRemote() {
+  clearTimeout(remoteTimer);
+  remoteTimer = setTimeout(() => {
+    const q = fold(sInput.value.trim());
+    if (q.length < 3 || q === remoteQ || !/^[a-z' .-]{3,30}$/.test(q) || state?.halted) return;
+    if (sMatch(q).local.filter((x) => x.player).length >= 3) return;     // the local index already answers it
+    remoteQ = q; want(`psearch:${q}`);
+  }, 450);
+}
+sInput.addEventListener('focus', sDraw);
+sInput.addEventListener('input', () => { sActive = -1; sDraw(); sAskRemote(); });
+sInput.addEventListener('blur', () => setTimeout(() => { res.hidden = true; sGhost.textContent = ''; }, 150));
+sInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!sItems.length) return; sActive = (sActive + (e.key === 'ArrowDown' ? 1 : -1) + sItems.length) % sItems.length; sDraw(); }
+  else if ((e.key === 'Tab' || e.key === 'ArrowRight') && sGhost.textContent && sInput.selectionStart === sInput.value.length) { e.preventDefault(); sInput.value = sItems[0].label; sActive = 0; sDraw(); }
+  else if (e.key === 'Enter') { e.preventDefault(); sGo(sItems[sActive >= 0 ? sActive : 0]); }
+  else if (e.key === 'Escape') { e.stopPropagation(); sInput.value = ''; res.hidden = true; sGhost.textContent = ''; sInput.blur(); }
 });
-res.addEventListener('click', () => { res.hidden = true; $('psearch').value = ''; });
-document.addEventListener('click', (e) => { if (!e.target.closest('.psearch')) res.hidden = true; });
+res.addEventListener('mousedown', (e) => e.preventDefault());
+res.addEventListener('click', (e) => {
+  if (e.target.id === 'ps-clear') { try { localStorage.removeItem(RECENT_KEY); } catch { } sDraw(); return; }
+  const li = e.target.closest('[data-i]'); if (li) sGo(sItems[Number(li.dataset.i)]);
+});
+bridge.on('data', (d) => { if (d.key.startsWith('psearch:') && !res.hidden) sDraw(); });
 
 $('btn-theme').addEventListener('click', () => {
   standaloneTheme = { system: 'light', light: 'dark', dark: 'system' }[standaloneTheme];

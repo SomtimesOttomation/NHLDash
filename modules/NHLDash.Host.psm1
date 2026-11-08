@@ -129,6 +129,11 @@ function Resolve-DataKey {
     }
     if ($k -eq 'espn:injuries') { return @{ Key = $k; Url = $script:Espn + 'injuries'; File = 'espn-injuries.json'; Kind = 'json'; Ttl = 1800 } }
     if ($k -eq 'espn:transactions') { return @{ Key = $k; Url = $script:Espn + 'transactions?limit=1000'; File = 'espn-transactions.json'; Kind = 'json'; Ttl = 1800 } }
+    if ($k -match '^psearch:([a-z'' .-]{3,30})$') {
+        # The NHL's own player search, asked only when the page's local index finds fewer than 3 players.
+        $q = $Matches[1]; $safe = ($q -replace '[^a-z]', '_')
+        return @{ Key = $k; Url = 'https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=20&q=' + [uri]::EscapeDataString($q); File = "psearch/$safe.json"; Kind = 'json'; Ttl = 86400 }
+    }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }
