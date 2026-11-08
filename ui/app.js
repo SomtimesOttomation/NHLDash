@@ -382,27 +382,86 @@ document.addEventListener('click', (e) => {
 const COLORS = { ANA: 'f47a38', BOS: 'ffb81c', BUF: '003087', CAR: 'cc0000', CBJ: '002654', CGY: 'c8102e', CHI: 'cf0a2c', COL: '6f263d', DAL: '006847', DET: 'ce1126', EDM: 'ff4c00', FLA: 'c8102e', LAK: '111111', MIN: '154734', MTL: 'af1e2d', NJD: 'ce1126', NSH: 'ffb81c', NYI: '00539b', NYR: '0038a8', OTT: 'c52032', PHI: 'f74902', PIT: 'fcb514', SEA: '001628', SJS: '006d75', STL: '002f87', TBL: '002868', TOR: '00205b', UTA: '6cace4', VAN: '00205b', VGK: 'b4975a', WPG: '041e42', WSH: 'c8102e' };
 const teamColor = (k) => `#${COLORS[k] || '6b7280'}`;
 const TEAMS = { ANA: 'Anaheim Ducks', BOS: 'Boston Bruins', BUF: 'Buffalo Sabres', CAR: 'Carolina Hurricanes', CBJ: 'Columbus Blue Jackets', CGY: 'Calgary Flames', CHI: 'Chicago Blackhawks', COL: 'Colorado Avalanche', DAL: 'Dallas Stars', DET: 'Detroit Red Wings', EDM: 'Edmonton Oilers', FLA: 'Florida Panthers', LAK: 'Los Angeles Kings', MIN: 'Minnesota Wild', MTL: 'Montreal Canadiens', NJD: 'New Jersey Devils', NSH: 'Nashville Predators', NYI: 'New York Islanders', NYR: 'New York Rangers', OTT: 'Ottawa Senators', PHI: 'Philadelphia Flyers', PIT: 'Pittsburgh Penguins', SEA: 'Seattle Kraken', SJS: 'San Jose Sharks', STL: 'St. Louis Blues', TBL: 'Tampa Bay Lightning', TOR: 'Toronto Maple Leafs', UTA: 'Utah Mammoth', VAN: 'Vancouver Canucks', VGK: 'Vegas Golden Knights', WPG: 'Winnipeg Jets', WSH: 'Washington Capitals' };
+// Settings: General / Data / Sync tabs, like NBADash (tab remembered).
+let setTab = (() => { try { return localStorage.getItem('nhldash.setTab') || 'general'; } catch { return 'general'; } })();
+const dataToggles = [];   // other features add { id, key, label, hint } here (Form, standings moves)
+let syncInfo = null, schedInfo = null;
 views.settings = () => {
   routeKeys = [];
   const s = state.settings, t = state.traffic;
-  return `<div class="grid two">
+  const tab = (k, l) => `<button type="button" role="tab" aria-selected="${setTab === k}" class="seg${setTab === k ? ' on' : ''}" data-settab="${k}">${l}</button>`;
+  let body = '';
+  if (setTab === 'general') {
+    body = `<div class="grid two">
     <section class="card"><h2>Favourite teams</h2><p class="muted">Click the star on a team in the banner (or on its team page). Favourites sit at the front of the banner, their games show first and their rows are highlighted.</p><p>${(s.favorites || []).length ? s.favorites.map((k) => `<a class="favchip" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a>`).join(' ') : '<span class="muted">None yet.</span>'}</p></section>
-    <section class="card"><h2>Automatic refresh</h2>
-      <p class="muted">Off: the dash only fetches when you open a page or press Refresh (F5). On: while this tab is visible, the scores and the game you have open are refetched on a timer.</p>
-      <label class="row"><span>Refresh automatically</span><input id="set-auto" type="checkbox"${s.autoRefresh ? ' checked' : ''}></label>
-      <label class="row"><span>Every</span><span><input id="set-secs" type="number" min="20" max="600" step="10" value="${s.refreshSeconds}"> seconds</span></label></section>
+    <section class="card"><h2>Theme</h2>${state.mode === 'launcher' ? '<p class="muted">Follows DashLauncher.</p>' : `<p class="muted">System follows Windows. Also on the button in the top bar.</p><div class="segs">${['system', 'light', 'dark'].map((x) => `<button type="button" class="seg${standaloneTheme === x ? ' on' : ''}" data-settheme="${x}">${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}</div>`}</section>
+    <section class="card"><h2>Updates</h2><p class="muted">Checks GitHub for a newer NHLDash release a few seconds after start. Click the version number (v${esc(state.version)}) to check any time. Not affected by the pause switch.</p>
+      <label class="row"><span>Check for updates on start</span><input id="set-upd" type="checkbox"${s.updateCheck !== false ? ' checked' : ''}></label></section>
+    </div>`;
+  } else if (setTab === 'data') {
+    const si = syncInfo;
+    body = `<div class="grid two">
+    <section class="card"><h2>Season sync</h2><p class="muted">Saves the season on this computer: weekly schedules and results, standings, rookies and, if ticked, every finished game's box score (one request every 0.6 s; a full season is about 1,300 games the first time, later syncs only fetch new games). Week pages, players of the week, Form, Leaders and Losers and the reports are built from it. A cancelled sync carries on where it stopped.</p>
+      <label class="row"><span>Include box scores</span><input id="set-syncbox" type="checkbox"${syncBoxes() ? ' checked' : ''}></label>
+      <p class="small">${si ? `${si.savedGames} games saved.` : ''} ${season.sync?.running ? `<b>Syncing ${season.sync.pct}%</b>` : ''}</p>
+      <div class="actions">${season.sync?.running ? '<button id="set-synccancel" class="btn" type="button">Cancel</button>' : `<button id="btn-sync" class="btn primary" type="button"${state.halted ? ' disabled' : ''}>Sync now</button>`}</div>
+      ${season.sync?.running ? `<div class="pbar"><i style="width:${season.sync.pct || 2}%"></i></div>` : ''}</section>
     <section class="card"><h2>MoneyPuck advanced stats</h2>
       <p class="muted">Expected goals, shot quality and goalie GSAx on the Advanced page. Downloads MoneyPuck's published season files when you open that page, at most every 12 hours.</p>
       <label class="row"><span>Use MoneyPuck</span><input id="set-mp" type="checkbox"${s.moneypuck ? ' checked' : ''}></label></section>
-    <section class="card"><h2>Updates</h2><p class="muted">Checks GitHub for a newer NHLDash release a few seconds after start. Click the version number to check any time. Not affected by the pause switch.</p>
-      <label class="row"><span>Check for updates on start</span><input id="set-upd" type="checkbox"${s.updateCheck !== false ? ' checked' : ''}></label></section>
+    ${dataToggles.length ? `<section class="card"><h2>Shown on pages</h2>${dataToggles.map((d) => `<label class="row"><span>${esc(d.label)}<br><small class="muted">${esc(d.hint)}</small></span><input id="${d.id}" type="checkbox"${d.get() ? ' checked' : ''}></label>`).join('')}</section>` : ''}
     <section class="card"><h2>Data and sources</h2>
-      <p class="small">NHL web API (api-web.nhle.com): scores, game centre, standings, leaders. Unofficial and undocumented; it can change without notice. <a href="https://www.nhl.com/info/terms-of-service" target="_blank" rel="noreferrer">NHL terms</a></p>
+      <p class="small">NHL web, stats and search APIs: scores, game centre, standings, leaders, rookies, player search. Unofficial and undocumented; they can change without notice. <a href="https://www.nhl.com/info/terms-of-service" target="_blank" rel="noreferrer">NHL terms</a></p>
+      <p class="small">ESPN public NHL endpoints: injuries and transactions, only when those pages are opened.</p>
       <p class="small">MoneyPuck.com season files (only when turned on). <a href="https://moneypuck.com/data.htm" target="_blank" rel="noreferrer">MoneyPuck data terms</a></p>
-      <p class="muted small">This session: ${t.requests} requests, ${(t.bytes / 1048576).toFixed(2)} MB, ${t.errors} errors.</p>
+      <p class="muted small">Saved in <code>${esc(state.cacheDir || '%LOCALAPPDATA%\\NHLDash\\cache')}</code>. This session: ${t.requests} requests, ${(t.bytes / 1048576).toFixed(2)} MB, ${t.errors} errors.</p>
       <div class="actions"><button id="set-clear" class="btn" type="button">Clear saved data</button><a class="btn" href="#/traffic">Traffic details</a></div></section>
-  </div>`;
+    </div>`;
+  } else {
+    const sc = schedInfo;
+    body = `<div class="grid two">
+    <section class="card"><h2>Automatic refresh</h2>
+      <p class="muted">Off: the dash only fetches when you open a page or press Refresh (F5). On: while this tab is visible, the scores and the game you have open are refetched on a timer.</p>
+      <label class="row"><span>Refresh automatically</span><input id="set-auto" type="checkbox"${s.autoRefresh ? ' checked' : ''}></label>
+      <label class="row"><span>Every</span><span><input id="set-secs" type="number" min="20" max="600" step="10" value="${s.refreshSeconds}"> seconds</span></label>
+      <p class="muted small">Timings: live games and the open game every ${s.refreshSeconds} s; standings 10 min; finished games are never fetched again; MoneyPuck at most every 12 h. A hidden tab and the pause switch stop all of it.</p></section>
+    <section class="card"><h2>Nightly sync</h2>
+      <p class="muted">A Windows scheduled task that runs the season sync once a night, so the season pages are ready in the morning. It runs as you, needs no admin rights, skips itself if NHLDash is open, and catches up if the PC was asleep. Log: cache\\logs\\sync.log.</p>
+      <p class="small">${sc ? (sc.exists ? `On, daily at <b>${esc(sc.time)}</b>${sc.lastRun ? `; last ran ${esc(new Date(sc.lastRun).toLocaleString())}` : ''}.` : 'Off.') : 'Checking...'}</p>
+      <label class="row"><span>Time</span><input id="set-schedtime" type="time" value="${esc(sc?.time || '04:00')}"></label>
+      <div class="actions"><button id="set-schedon" class="btn primary" type="button">${sc?.exists ? 'Change time' : 'Turn on'}</button>${sc?.exists ? '<button id="set-schedoff" class="btn" type="button">Turn off</button>' : ''}</div></section>
+    </div>`;
+  }
+  return `<div class="segs bar1" role="tablist">${tab('general', 'General')}${tab('data', 'Data')}${tab('sync', 'Sync')}</div><div class="setbody">${body}</div>`;
 };
+const syncBoxes = () => { try { return localStorage.getItem('nhldash.syncBoxes') !== '0'; } catch { return true; } };
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-settab]');
+  if (t) { setTab = t.dataset.settab; try { localStorage.setItem('nhldash.setTab', setTab); } catch { } loadSettingsInfo(); render(); return; }
+  const th = e.target.closest('[data-settheme]');
+  if (th) { standaloneTheme = th.dataset.settheme; try { localStorage.setItem('theme', standaloneTheme); } catch { } bridge.setTheme(standaloneTheme); $('btn-theme').textContent = `Theme: ${standaloneTheme}`; bannerSig = ''; render(); return; }
+  if (e.target.id === 'set-synccancel') { await bridge.request('sync.cancel').catch(() => {}); return; }
+  if (e.target.id === 'set-schedon') {
+    const time = $('set-schedtime').value || '04:00';
+    if (!schedInfo?.exists) {
+      const ok = await confirmDialog('Turn on the nightly sync?', `<p>Windows will run NHLDash's season sync every night at ${esc(time)}, without NHLDash open. It contacts the NHL's servers on its own: a few requests for the schedule and standings, plus one per new finished game.</p><p class="muted">You can turn it off here at any time.</p>`);
+      if (!ok) return;
+    }
+    try { schedInfo = await bridge.request('schedule.set', { time, ack: true }); } catch (err) { alertNote(err.message); }
+    render(); return;
+  }
+  if (e.target.id === 'set-schedoff') { try { schedInfo = await bridge.request('schedule.remove'); } catch (err) { alertNote(err.message); } render(); }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'set-syncbox') { try { localStorage.setItem('nhldash.syncBoxes', e.target.checked ? '1' : '0'); } catch { } }
+  const d = dataToggles.find((x) => x.id === e.target.id);
+  if (d) { d.set(e.target.checked); render(); }
+});
+async function loadSettingsInfo() {
+  if (setTab === 'data') { try { syncInfo = await bridge.request('sync.status'); } catch { } render(); }
+  if (setTab === 'sync' && !schedInfo) { try { schedInfo = await bridge.request('schedule.get'); } catch { schedInfo = { exists: false }; } render(); }
+}
+window.addEventListener('hashchange', () => { if (parseRoute().view === 'settings') loadSettingsInfo(); });
 function confirmDialog(title, html) {
   return new Promise((resolve) => {
     $('dialog-title').textContent = title; $('dialog-body').innerHTML = html; $('dialog').hidden = false; $('dialog-ok').focus();
@@ -621,6 +680,7 @@ const season = { weeks: [], loaded: false, sync: null };   // weeks: [{ monday, 
 async function loadSeason() {
   try { season.weeks = await bridge.request('season.weeks'); } catch { season.weeks = []; }
   season.loaded = true;
+  store.delete('seasonbox'); bridge.request('data.get', { key: 'seasonbox' }).catch(() => {});
   for (const w of season.weeks) if (w.cached && get(`week:${w.monday}`) === undefined) bridge.request('data.get', { key: `week:${w.monday}`, cacheOnly: true }).catch(() => {});
   render();
 }
@@ -660,11 +720,11 @@ async function runSync() {
   const total = season.weeks.length;
   const cached = season.weeks.filter((w) => w.cached).length;
   if (!syncAck()) {
-    const ok = await confirmDialog('Sync the season?', `<p>NHLDash will download the NHL schedule and results one week at a time, about ${Math.max(2, total - cached + 3)} requests now. Weeks already saved are not downloaded again, so later syncs are only a few requests.</p><p class="muted">It runs in the background, keeps going if you switch tabs, and the pause button stops it.</p>`);
+    const ok = await confirmDialog('Sync the season?', `<p>NHLDash will download the NHL schedule and results one week at a time, about ${Math.max(2, total - cached + 3)} requests${syncBoxes() ? ', then one request every 0.6 s for each finished game whose box score is not saved yet (a few hundred the first time, more later in the season)' : ''}. Saved weeks and finished games are never downloaded again, so later syncs are only a few requests. Box scores can be switched off in Settings &gt; Data.</p><p class="muted">It runs in the background, keeps going if you switch tabs, and the pause button stops it.</p>`);
     if (!ok) return;
     try { localStorage.setItem('syncAck', '1'); } catch { }
   }
-  try { const r = await bridge.request('sync.run'); if (r && r.started) { season.sync = { running: true, pct: 0 }; render(); } }
+  try { const r = await bridge.request('sync.run', { boxes: syncBoxes() }); if (r && r.started) { season.sync = { running: true, pct: 0 }; render(); } }
   catch (e) { alertNote(e.message); }
 }
 const syncAck = () => { try { return localStorage.getItem('syncAck') === '1'; } catch { return false; } };
@@ -673,6 +733,7 @@ bridge.on('sync', async (d) => {
   season.sync = d;
   if (!d.running) {
     season.sync = null;
+    if (parseRoute().view === 'settings') loadSettingsInfo();
     if (!d.cancelled) { alertNote('Season sync finished.'); await loadSeason(); return; }
   }
   render();

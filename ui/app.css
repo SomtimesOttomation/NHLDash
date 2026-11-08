@@ -416,3 +416,7 @@ a.seg.on { color: var(--on-accent2); }
 .gstat { justify-content: space-between; }
 .gfav { color: #f5a524; font-size: 14px; }
 .glast { margin-top: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setbody { min-height: 260px; }
+code { font-size: 12px; background: var(--surface2); padding: 1px 5px; border-radius: 5px; }
+input[type=time] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+.setbody > .grid, #view > .grid.two, #view > .grid.three { padding: 14px 0; max-width: none; }
