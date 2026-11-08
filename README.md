@@ -5,7 +5,7 @@ DashLauncher. Windows PowerShell 5.1 + WebView2, no installer, no admin rights, 
 
 Team banner with favourites; team, player and week pages; scores (any date) with a game flow chart and shot map;
 standings, leaders, power rankings, rookie watch, East-West report, compare; transactions, injuries and free agents;
-an updater (version button) and a traffic page. Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
+an updater (version button) and a traffic page; Leaders and Losers, Form, report card, players of the week. See ARCHITECTURE.md. Scores (any date), live game status, box scores, scoring summary, shot maps, standings (division, conference,
 league), skater and goalie leaders. Optional advanced stats (xG, shot quality, goalie GSAx) from MoneyPuck.
 
 ## Data sources

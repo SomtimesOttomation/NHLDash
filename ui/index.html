@@ -36,6 +36,7 @@
       <button id="btn-refresh" class="np-btn" type="button" title="Refresh (F5)" aria-label="Refresh"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <span class="np-sep" aria-hidden="true"></span>
       <div class="psearch">
+        <div id="psearch-ghost" class="psearch-ghost" aria-hidden="true"></div>
         <input id="psearch" type="search" placeholder="Search teams and players..." autocomplete="off" spellcheck="false" aria-label="Search teams and players">
         <div id="psearch-results" class="psearch-results" hidden></div>
       </div>
@@ -64,6 +65,7 @@
   <div id="upd" class="dialog" hidden role="dialog" aria-modal="true" aria-label="Updates"><div class="dialog-box upd" id="upd-box"></div></div>
 
   <p class="foot muted small">Unofficial. Not affiliated with the NHL or any data provider. Data is fetched on this computer when you ask for it.</p>
+  <script src="dev/mock.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

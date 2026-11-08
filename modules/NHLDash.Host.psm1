@@ -27,8 +27,6 @@ $script:Settings = $null
 $script:Visible = $false
 $script:Watch = @()
 $script:NextAuto = [datetime]::MaxValue
-$script:SyncKeys = $null
-$script:SyncTotal = 1
 $script:LastSyncPct = -1
 $script:Shared = $null
 $script:Queue = $null
@@ -129,6 +127,16 @@ function Resolve-DataKey {
     }
     if ($k -eq 'espn:injuries') { return @{ Key = $k; Url = $script:Espn + 'injuries'; File = 'espn-injuries.json'; Kind = 'json'; Ttl = 1800 } }
     if ($k -eq 'espn:transactions') { return @{ Key = $k; Url = $script:Espn + 'transactions?limit=1000'; File = 'espn-transactions.json'; Kind = 'json'; Ttl = 1800 } }
+    if ($k -match '^psearch:([a-z'' .-]{3,30})$') {
+        # The NHL's own player search, asked only when the page's local index finds fewer than 3 players.
+        $q = $Matches[1]; $safe = ($q -replace '[^a-z]', '_')
+        return @{ Key = $k; Url = 'https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=20&q=' + [uri]::EscapeDataString($q); File = "psearch/$safe.json"; Kind = 'json'; Ttl = 86400 }
+    }
+    if ($k -cmatch '^mug:([A-Z]{3}):(\d{7,8})$') {
+        # Player pictures, saved on this computer like the logos (one download per player, kept 30 days).
+        return @{ Key = $k; Url = "https://assets.nhle.com/mugs/nhl/$(Get-SeasonId)/$($Matches[1])/$($Matches[2]).png"; File = "mugs/$($Matches[2]).png"; Kind = 'png'; Ttl = 2592000 }
+    }
+    if ($k -eq 'seasonbox') { return @{ Key = $k; Url = ''; File = 'season-box.json'; Kind = 'json'; Ttl = 0; Local = $true } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
         return @{ Key = $k; Url = $script:NhlApi + 'skater-stats-leaders/current?categories=points,goals,assists,plusMinus&limit=10'; File = 'leaders.json'; Kind = 'json'; Ttl = 1800 }
@@ -170,10 +178,30 @@ function New-DataEvent {
     }
 }
 
+$script:FinalFiles = @{}
+function Test-FinalFile {
+    <# A saved box score or play-by-play of a finished game never changes, so it is never downloaded again. #>
+    param([string]$File)
+    if ($script:FinalFiles.ContainsKey($File)) { return $true }
+    try {
+        $p = Join-Path $script:CacheDir $File
+        $fs = [IO.File]::OpenRead($p); $buf = New-Object byte[] 2048; $n = $fs.Read($buf, 0, 2048); $fs.Close()
+        if ([Text.Encoding]::UTF8.GetString($buf, 0, $n) -match '"gameState"\s*:\s*"(OFF|FINAL)"') { $script:FinalFiles[$File] = $true; return $true }
+    } catch { }
+    return $false
+}
+
 function Request-Data {
     <# Answers from the cache when it is fresh enough, otherwise queues a download. Returns 'cached', 'queued' or 'busy'. #>
-    param($Spec, [bool]$Force)
+    param($Spec, [bool]$Force, $Extra)
     $age = Get-CacheAge $Spec.File
+    if ($Spec.Local) {
+        if ($null -ne $age) { $script:Out.Enqueue((New-DataEvent $Spec $true)); return 'cached' }
+        return 'missing'
+    }
+    if (-not $Force -and $null -ne $age -and $Spec.Key -match '^(box|pbp):' -and (Test-FinalFile $Spec.File)) {
+        try { $script:Out.Enqueue((New-DataEvent $Spec $true)); return 'cached' } catch { }
+    }
     if (-not $Force -and $null -ne $age -and $age -lt $Spec.Ttl) {
         try { $script:Out.Enqueue((New-DataEvent $Spec $true)); return 'cached' } catch { }
     }
@@ -184,6 +212,7 @@ function Request-Data {
     if ($script:Shared.Pending.ContainsKey($Spec.Key)) { return 'busy' }
     $script:Shared.Pending[$Spec.Key] = $true
     $item = @{} + $Spec
+    if ($Extra) { foreach ($k in $Extra.Keys) { $item[$k] = $Extra[$k] } }
     $item.Gen = $script:Shared.Gen
     $script:Queue.Add($item)
     return 'queued'
@@ -207,6 +236,56 @@ $script:WorkerScript = {
             $resp.GetResponseStream().CopyTo($ms)
             return , $ms.ToArray()
         } finally { $resp.Close() }
+    }
+
+    function Get-Sec([string]$T) { if ($T -match '^(\d+):(\d+)$') { return [int]$Matches[1] * 60 + [int]$Matches[2] }; return 0 }
+    function Save-CompactBox([string]$Text, [string]$Date) {
+        # A small copy of a finished game's box score for season pages (players of the week, form, leaderboards).
+        $b = $Text | ConvertFrom-Json
+        if ($b.gameState -ne 'OFF' -and $b.gameState -ne 'FINAL') { return }
+        $rows = New-Object System.Collections.Generic.List[string]
+        $gks = New-Object System.Collections.Generic.List[string]
+        foreach ($side in @('awayTeam', 'homeTeam')) {
+            $ab = [string]$b.$side.abbrev
+            $t = $b.playerByGameStats.$side
+            foreach ($p in @($t.forwards) + @($t.defense)) {
+                if (-not $p) { continue }
+                $rows.Add((ConvertTo-Json -Compress -InputObject @([int]$p.playerId, [string]$p.name.default, $ab, [string]$p.position, [int]$p.goals, [int]$p.assists, [int]$p.plusMinus, [int]$p.sog, [int]$p.hits, [int]$p.blockedShots, [int]$p.pim, (Get-Sec $p.toi), [double]$p.faceoffWinningPctg, [int]$p.powerPlayGoals, [int]$p.giveaways, [int]$p.takeaways)))
+            }
+            foreach ($g in @($t.goalies)) {
+                if (-not $g -or (Get-Sec $g.toi) -eq 0) { continue }
+                $gks.Add((ConvertTo-Json -Compress -InputObject @([int]$g.playerId, [string]$g.name.default, $ab, [int]$g.shotsAgainst, [int]$g.saves, [int]$g.goalsAgainst, (Get-Sec $g.toi), [string]$g.decision)))
+            }
+        }
+        $d = if ($Date) { $Date } else { [string]$b.gameDate }
+        $json = '{{"id":{0},"date":"{1}","type":{2},"last":"{3}","away":{{"a":"{4}","s":{5},"sog":{6}}},"home":{{"a":"{7}","s":{8},"sog":{9}}},"p":[{10}],"g":[{11}]}}' -f $b.id, $d, [int]$b.gameType, [string]$b.gameOutcome.lastPeriodType, $b.awayTeam.abbrev, [int]$b.awayTeam.score, [int]$b.awayTeam.sog, $b.homeTeam.abbrev, [int]$b.homeTeam.score, [int]$b.homeTeam.sog, ($rows -join ','), ($gks -join ',')
+        $dir = Join-Path $CacheDir 'boxc'
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [IO.File]::WriteAllText((Join-Path $dir "$($b.id).json"), $json, $utf8)
+    }
+    function Add-SyncBoxes($Item) {
+        # Second step of a season sync: every finished game in the saved weeks whose box score is not saved yet.
+        $added = 0
+        foreach ($f in @(Get-ChildItem -LiteralPath $CacheDir -Filter 'week-*.json' -File -ErrorAction SilentlyContinue)) {
+            try { $w = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json } catch { continue }
+            foreach ($day in @($w.gameWeek)) {
+                foreach ($g in @($day.games)) {
+                    if (-not $g -or [int]$g.gameType -lt 2) { continue }
+                    if ($g.gameState -ne 'OFF' -and $g.gameState -ne 'FINAL') { continue }
+                    if (Test-Path (Join-Path $CacheDir "boxc/$($g.id).json")) { continue }
+                    $Queue.Add(@{ Key = "box:$($g.id)"; Url = $Item.NhlApi + "gamecenter/$($g.id)/boxscore"; File = "box-$($g.id).json"; Kind = 'json'; Sync = $true; Quiet = $true; Date = [string]$day.date; Delay = 600; Gen = $Item.Gen })
+                    $Shared.SyncTotal++; $added++
+                }
+            }
+        }
+        $Queue.Add(@{ Key = 'syncpack'; Kind = 'syncpack'; Sync = $true; Gen = $Item.Gen; Url = '' })
+        $Shared.SyncTotal++
+        $Shared.SyncNote = "$added box scores to download"
+    }
+    function Save-SeasonPack {
+        # Joins every saved small box score into one file the page reads in one go.
+        $parts = foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $CacheDir 'boxc') -Filter '*.json' -File -ErrorAction SilentlyContinue)) { [IO.File]::ReadAllText($f.FullName) }
+        [IO.File]::WriteAllText((Join-Path $CacheDir 'season-box.json'), ('[' + (@($parts) -join ',') + ']'), $utf8)
     }
 
     function Select-MoneyPuck([string]$Text, [string]$Key) {
@@ -235,9 +314,13 @@ $script:WorkerScript = {
 
     while (-not $Shared.Quit) {
         $item = $null
-        if (-not $Queue.TryTake([ref]$item, 500)) { continue }
+        if (-not $Queue.TryTake([ref]$item, 500)) { if ($Shared.ExitWhenIdle) { break }; continue }
         try {
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen -or $Shared.Skip.ContainsKey($item.Key)) { continue }
+            if ($item.Sync -and $Shared.SyncCancel) { continue }
+            if ($item.Kind -eq 'syncboxes') { Add-SyncBoxes $item; continue }
+            if ($item.Kind -eq 'syncpack') { Save-SeasonPack; continue }
+            if ($item.Delay) { Start-Sleep -Milliseconds ([int]$item.Delay) }
             $Shared.Requests++
             $hostName = ([uri]$item.Url).Host
             if (-not $Shared.ByHost.ContainsKey($hostName)) { $Shared.ByHost[$hostName] = @{ requests = 0; bytes = [long]0; errors = 0 } }
@@ -258,15 +341,21 @@ $script:WorkerScript = {
                     $text = $utf8.GetString($bytes).Trim()
                     if (-not ($text.StartsWith('{') -or $text.StartsWith('['))) { throw 'The NHL API sent something that is not JSON.' }
                     [IO.File]::WriteAllText($path, $text, $utf8)
+                    if ($item.Key -like 'box:*') { try { Save-CompactBox $text $item.Date } catch { } }
                     if ($item.Key -eq $Shared.TodayKey) {
                         $Shared.Live = ([regex]::Matches($text, '"gameState"\s*:\s*"(LIVE|CRIT)"')).Count
                     }
-                    $Out.Enqueue($head + $text + '}}')
+                    if (-not $item.Quiet) { $Out.Enqueue($head + $text + '}}') }
                 }
                 'csv' {
                     $text = Select-MoneyPuck ($utf8.GetString($bytes)) $item.Key
                     [IO.File]::WriteAllText($path, $text, $utf8)
                     $Out.Enqueue($head + (ConvertTo-Json -InputObject $text -Compress) + '}}')
+                }
+                'png' {
+                    if ($bytes.Length -lt 8 -or $bytes[0] -ne 0x89 -or $bytes[1] -ne 0x50) { throw 'Picture download was not a PNG.' }
+                    [IO.File]::WriteAllBytes($path, $bytes)
+                    $Out.Enqueue($head + 'null}}')
                 }
                 default {
                     $text = $utf8.GetString($bytes)
@@ -286,7 +375,7 @@ $script:WorkerScript = {
                 $Out.Enqueue('{"event":"data","data":{"key":' + (ConvertTo-Json $item.Key) + ',"ok":false,"error":' + (ConvertTo-Json -InputObject ([string]$msg) -Compress) + '}}')
             }
         } finally {
-            if ($item) { $Shared.Pending.Remove($item.Key) }
+            if ($item) { $Shared.Pending.Remove($item.Key); if ($item.Sync) { $Shared.SyncDone++ } }
         }
     }
 }
@@ -315,6 +404,7 @@ function Get-Snapshot {
         error = $script:Shared.LastError
         settings = $script:Settings
         today = (Get-Date).ToString('yyyy-MM-dd')
+        cacheDir = $script:CacheDir
         traffic = @{ requests = [int]$script:Shared.Requests; bytes = [long]$script:Shared.Bytes; errors = [int]$script:Shared.Errors }
     }
 }
@@ -389,6 +479,68 @@ function Get-UpdateEvents {
         if ($json -ne $script:LastUpdJson) { $script:LastUpdJson = $json; $list += $json }
     }
     return $list
+}
+
+# ---------------------------------------------------------------- season sync (page button, master sync, nightly task)
+function Start-SeasonSync {
+    <# Weeks (schedule and results), standings, rookies, then (when asked) every finished game's box score.
+       Saved weeks and saved finished box scores are never downloaded again, so a cancelled sync resumes. #>
+    param([bool]$Boxes = $true)
+    $sh = $script:Shared
+    $sh.SyncCancel = $false; $sh.SyncDone = 0; $sh.SyncTotal = 0; $sh.SyncNote = ''; $sh.SyncActive = $true
+    $script:LastSyncPct = -1
+    $weeks = Get-SeasonWeeks
+    for ($i = 0; $i -lt $weeks.Count; $i++) {
+        $spec = Resolve-DataKey ('week:' + $weeks[$i])
+        if ((Request-Data $spec ($i -eq $weeks.Count - 1) @{ Sync = $true; Quiet = $true }) -eq 'queued') { $sh.SyncTotal++ }
+    }
+    foreach ($k in @('standings', 'rookies')) { if ((Request-Data (Resolve-DataKey $k) $true @{ Sync = $true }) -eq 'queued') { $sh.SyncTotal++ } }
+    if ($Boxes) { $script:Queue.Add(@{ Key = 'syncboxes'; Kind = 'syncboxes'; Sync = $true; Gen = $sh.Gen; Url = ''; NhlApi = $script:NhlApi }); $sh.SyncTotal++ }
+    if ($sh.SyncTotal -eq 0) { $sh.SyncActive = $false }
+    return $sh.SyncTotal
+}
+
+$script:TaskName = 'NHLDash Nightly Sync'
+function Get-NightlyTask {
+    try {
+        $t = Get-ScheduledTask -TaskName $script:TaskName -ErrorAction Stop
+        $at = ''; try { $at = ([datetime]$t.Triggers[0].StartBoundary).ToString('HH:mm') } catch { }
+        $info = $null; try { $info = $t | Get-ScheduledTaskInfo } catch { }
+        return @{ exists = $true; time = $at; lastRun = $(if ($info -and $info.LastRunTime.Year -gt 2000) { $info.LastRunTime.ToString('o') } else { '' }) }
+    } catch { return @{ exists = $false; time = ''; lastRun = '' } }
+}
+function Set-NightlyTask {
+    param([string]$Time = '04:00', [switch]$Remove)
+    $script = Join-Path $script:Root 'Register-NHLSyncTask.ps1'
+    $args2 = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $script))
+    if ($Remove) { $args2 += '-Unregister' } else { $args2 += @('-Time', $Time) }
+    try { Start-Process -FilePath 'powershell.exe' -ArgumentList $args2 -WindowStyle Hidden -Wait | Out-Null } catch { return @{ exists = $false; error = $_.Exception.Message } }
+    return Get-NightlyTask
+}
+
+function Invoke-NhlHeadlessSync {
+    <# Used by Sync-NHLCache.ps1 (the nightly task): the same season sync with no window, then exit.
+       Skips when NHLDash is open, so two copies never write the cache at once. #>
+    param([string]$Root = (Split-Path $PSScriptRoot))
+    $created = $false
+    $m = New-Object System.Threading.Mutex($true, 'Local\DashHost-nhldash', [ref]$created)
+    if (-not $created) { $m.Dispose(); return 'NHLDash is open; skipped (it syncs from its own window).' }
+    try {
+        $ctx = [pscustomobject]@{ Mode = 'headless'; Root = $Root; Post = $null; Close = $null; Relaunch = ''; HostPid = $PID; Theme = ''; LauncherVersion = ''; Debug = $false }
+        $script:Root = $Root
+        try { $script:Version = ([IO.File]::ReadAllText((Join-Path $Root 'VERSION'))).Trim() } catch { }
+        $local = Join-Path $env:LOCALAPPDATA 'NHLDash'
+        $script:CacheDir = Join-Path $local 'cache'
+        if (-not (Test-Path $script:CacheDir)) { New-Item -ItemType Directory -Path $script:CacheDir -Force | Out-Null }
+        $script:Ctx = $ctx
+        $script:Shared = [hashtable]::Synchronized(@{ Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null
+            Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{}); Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; TodayKey = ''; ExitWhenIdle = $true })
+        $script:Queue = New-Object 'System.Collections.Concurrent.BlockingCollection[object]'
+        $script:Out = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+        [void](Start-SeasonSync $true)
+        & $script:WorkerScript $script:Shared $script:Queue $script:Out $script:CacheDir "NHLDash/$($script:Version) (nightly sync)"
+        return ('Done: {0} requests, {1} errors, {2}' -f $script:Shared.Requests, $script:Shared.Errors, $script:Shared.SyncNote)
+    } finally { $script:Ctx = $null; $script:Shared = $null; try { $m.ReleaseMutex() } catch { }; $m.Dispose() }
 }
 
 # ---------------------------------------------------------------- contract functions
@@ -551,26 +703,39 @@ function Invoke-DashCommand {
             }
             'sync.run' {
                 if ($script:Shared.Halted) { ReplyError $id 'Data traffic is paused. Resume first.'; return }
-                if ($script:SyncKeys) { Reply $id 'false'; return }
+                if ($script:Shared.SyncActive) { Reply $id 'false'; return }
                 Start-WorkerRunspace
-                $script:Shared.Skip.Clear()
-                $weeks = Get-SeasonWeeks
-                $keys = @()
-                for ($i = 0; $i -lt $weeks.Count; $i++) {
-                    $spec = Resolve-DataKey ('week:' + $weeks[$i])
-                    $r = Request-Data $spec ($i -eq $weeks.Count - 1)     # finished weeks come from the cache when saved
-                    if ($r -ne 'cached') { $keys += $spec.Key }
-                }
-                foreach ($k in @('standings', 'rookies')) { if ((Request-Data (Resolve-DataKey $k) $true) -ne 'cached') { $keys += $k } }
-                $script:SyncKeys = $keys
-                $script:SyncTotal = [Math]::Max(1, $keys.Count)
-                $script:LastSyncPct = -1
-                Reply $id (ConvertTo-Json @{ started = $true; requests = $keys.Count; weeks = $weeks.Count } -Compress)
+                $n = Start-SeasonSync ([bool]$a.boxes)
+                Reply $id (ConvertTo-Json @{ started = $true; requests = $n } -Compress)
             }
             'sync.cancel' {
-                if ($script:SyncKeys) { foreach ($k in $script:SyncKeys) { $script:Shared.Skip[$k] = $true } }
+                if ($script:Shared.SyncActive) { $script:Shared.SyncCancel = $true }
                 Reply $id 'true'
             }
+            'sync.status' {
+                $sh = $script:Shared
+                Reply $id (ConvertTo-Json @{ running = [bool]$sh.SyncActive; done = [int]$sh.SyncDone; total = [int]$sh.SyncTotal; note = [string]$sh.SyncNote; savedGames = @(Get-ChildItem -LiteralPath (Join-Path $script:CacheDir 'boxc') -Filter '*.json' -File -ErrorAction SilentlyContinue).Count } -Compress)
+            }
+            'players.fetch' {
+                # Opt-in bulk download (for example draft info for every rookie): one request per second.
+                $n = 0
+                foreach ($pl in @($a.ids | Select-Object -First 120)) {
+                    if ([string]$pl -notmatch '^\d{7,8}$') { continue }
+                    $spec = Resolve-DataKey ("player:$pl")
+                    if ($null -ne (Get-CacheAge $spec.File)) { continue }
+                    if ((Request-Data $spec $false @{ Delay = 1000 }) -eq 'queued') { $n++ }
+                }
+                Start-WorkerRunspace
+                Reply $id ([string]$n)
+            }
+            'schedule.get' { Reply $id (ConvertTo-PageJson (Get-NightlyTask)) }
+            'schedule.set' {
+                $t = [string]$a.time
+                if ($t -notmatch '^([01]\d|2[0-3]):[0-5]\d$') { ReplyError $id 'Time must look like 04:00.'; return }
+                if (-not [bool]$a.ack) { ReplyError $id 'The nightly sync needs the warning acknowledged.'; return }
+                Reply $id (ConvertTo-PageJson (Set-NightlyTask -Time $t))
+            }
+            'schedule.remove' { Reply $id (ConvertTo-PageJson (Set-NightlyTask -Remove)) }
             'traffic.get' {
                 $s = $script:Shared
                 $hosts = @{}
@@ -612,11 +777,14 @@ function Receive-DashEvents {
     }
     $out = New-Object System.Collections.Generic.List[string]
     foreach ($u in @(Get-UpdateEvents)) { if ($u) { $out.Add($u) } }
-    if ($script:SyncKeys) {
-        $left = @($script:SyncKeys | Where-Object { $script:Shared.Pending.ContainsKey($_) }).Count
-        $pct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal)
-        if ($left -eq 0) { $script:SyncKeys = $null; $out.Add('{"event":"sync","data":{"running":false,"pct":100}}') }
-        elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0}}}}}' -f $pct)) }
+    $sh = $script:Shared
+    if ($sh.SyncActive) {
+        $tot = [Math]::Max(1, [int]$sh.SyncTotal)
+        $pct = [int][Math]::Min(100, 100 * $sh.SyncDone / $tot)
+        if ($sh.SyncDone -ge $sh.SyncTotal) {
+            $sh.SyncActive = $false
+            $out.Add(('{{"event":"sync","data":{{"running":false,"pct":100,"cancelled":{0},"note":{1}}}}}' -f ([bool]$sh.SyncCancel).ToString().ToLower(), (ConvertTo-Json ([string]$sh.SyncNote))))
+        } elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0},"done":{1},"total":{2}}}}}' -f $pct, $sh.SyncDone, $sh.SyncTotal)) }
     }
     $msg = $null
     while ($out.Count -lt 25 -and $script:Out.TryDequeue([ref]$msg)) { $out.Add($msg) }
@@ -629,10 +797,7 @@ function Get-DashStatus {
     if (-not $s) { return @{ Live = 0; Syncing = $false; SyncPct = $null; UpdateAvailable = $null; Error = $null; Traffic = @{ Requests = 0; Bytes = 0; Errors = 0 } } }
     $syncing = $false
     $syncPct = $null
-    if ($script:SyncKeys) {
-        $left = @($script:SyncKeys | Where-Object { $s.Pending.ContainsKey($_) }).Count
-        if ($left -gt 0) { $syncing = $true; $syncPct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal) }
-    }
+    if ($s.SyncActive) { $syncing = $true; $syncPct = [int][Math]::Min(100, 100 * $s.SyncDone / [Math]::Max(1, [int]$s.SyncTotal)) }
     return @{
         Live            = $(if ($s.Halted) { 0 } else { [int]$s.Live })
         Syncing         = $syncing
@@ -649,8 +814,7 @@ function Stop-DashTraffic {
     $script:Shared.Halted = $true
     $script:Shared.Gen++
     Clear-Queue
-    if ($script:SyncKeys) { $script:Out.Enqueue('{"event":"sync","data":{"running":false,"pct":0,"cancelled":true}}') }
-    $script:SyncKeys = $null
+    if ($script:Shared.SyncActive) { $script:Shared.SyncActive = $false; $script:Out.Enqueue('{"event":"sync","data":{"running":false,"pct":0,"cancelled":true}}') }
     $script:NextAuto = [datetime]::MaxValue
     Send-Page '{"event":"traffic","data":{"stopped":true}}'
 }
@@ -675,14 +839,10 @@ function Invoke-DashSync {
     <# Optional (master sync, switched off in the launcher for now): today's scores and the standings. #>
     param([ValidateSet('quick')][string]$Scope = 'quick')
     if (-not $script:Shared -or $script:Shared.Halted) { return $false }
-    if ($script:SyncKeys) { return $false }
+    if ($script:Shared.SyncActive) { return $false }
     Start-WorkerRunspace
-    $keys = @('score:' + (Get-Date).ToString('yyyy-MM-dd'), 'standings')
-    foreach ($k in $keys) { [void](Request-Data (Resolve-DataKey $k) $true) }
-    $script:SyncKeys = $keys
-    $script:SyncTotal = $keys.Count
-    $script:LastSyncPct = -1
+    [void](Start-SeasonSync $false)
     return $true
 }
 
-Export-ModuleMember -Function Initialize-Dash, Start-DashWorker, Suspend-DashWorker, Invoke-DashCommand, Receive-DashEvents, Get-DashStatus, Stop-DashTraffic, Stop-Dash, Invoke-DashSync
+Export-ModuleMember -Function Invoke-NhlHeadlessSync, Initialize-Dash, Start-DashWorker, Suspend-DashWorker, Invoke-DashCommand, Receive-DashEvents, Get-DashStatus, Stop-DashTraffic, Stop-Dash, Invoke-DashSync
