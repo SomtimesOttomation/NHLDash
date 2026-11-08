@@ -466,3 +466,25 @@ span.up { color: #16a34a; font-weight: 700; } span.down { color: var(--live); fo
 .seedc { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text); text-decoration: none; border: 1px solid transparent; }
 .seedc:hover { background: var(--surface2); }
 .seedr.ebetter .seedc:first-child { border-color: #1d5fbf; } .seedr.wbetter .seedc:last-child { border-color: #b8282e; }
+
+.mug { border-radius: 50%; background: var(--surface2); object-fit: cover; flex: none; display: inline-block; }
+.thead .mug { width: 96px; height: 96px; }
+.podium { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 14px 0; }
+.podc { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); text-decoration: none; text-align: center; }
+.podc.first { border-color: var(--accent); }
+.podc:hover { background: var(--surface2); }
+
+.cmptbl th { vertical-align: bottom; }
+.cmpp { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text); text-decoration: none; font-size: 13px; }
+.cmptbl td.best { font-weight: 800; color: var(--accent2); }
+.cmpbar .btn.primary { color: var(--on-accent2); }
+
+/* Transactions chips (NBADash colours) and free agents */
+.chip { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; background: var(--surface2); color: var(--muted); }
+.chip.tx-trade { background: color-mix(in srgb, var(--accent2) 16%, transparent); color: var(--accent2); }
+.chip.tx-signed, .chip.new { background: color-mix(in srgb, #1f9d55 16%, transparent); color: #1f9d55; }
+.chip.tx-released, .chip.tx-injury { background: color-mix(in srgb, var(--live) 14%, transparent); color: var(--live); }
+.chip.tx-waivers { background: color-mix(in srgb, #b7892b 16%, transparent); color: #b7892b; }
+.fanote { width: 200px; font: inherit; font-size: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; }
+.fasigned { display: flex; align-items: center; gap: 10px; color: var(--text); border-color: #f5a524; }
+.tbl td .mug { vertical-align: middle; margin-right: 4px; }

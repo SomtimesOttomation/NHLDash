@@ -28,11 +28,12 @@ bridge.on('data', (d) => {
     let body = d.body;
     if (typeof body === 'string' && d.key.startsWith('mp:')) body = parseCsv(body);
     if (d.key.startsWith('logo:')) { logoReady(d.key); return; }
+    if (d.key.startsWith('mug:')) { const id = d.key.split(':')[2]; document.querySelectorAll(`img[data-mug="${id}"]`).forEach((img) => { img.style.visibility = ''; img.src = img.src.split('?')[0] + '?t=' + Date.now(); }); return; }
     store.set(d.key, { body, at: new Date(d.at), loading: false, error: null });
     if (d.key === `score:${today()}`) state.live = liveCount(body);
   } else {
     store.set(d.key, { ...cur, loading: false, error: d.error });
-    if (d.key.startsWith('logo:')) return;
+    if (d.key.startsWith('logo:') || d.key.startsWith('mug:')) return;
   }
   render();
 });
@@ -58,9 +59,19 @@ function logo(abbrev, cls = 'tlogo') {
   const v = isDark() ? 'dark' : 'light';
   return `<img class="${cls}" alt="" data-logo="${abbrev}" src="https://nhldash.cache/logos/${abbrev}_${v}.svg">`;
 }
+function mug(id, team, size = 40) {
+  if (!/^\d{7,8}$/.test(String(id)) || !/^[A-Z]{3}$/.test(team || '')) return `<span class="mug" style="width:${size}px;height:${size}px"></span>`;
+  return `<img class="mug" alt="" width="${size}" height="${size}" data-mug="${id}" data-mugteam="${team}" src="https://nhldash.cache/mugs/${id}.png">`;
+}
 // A logo that is not cached yet fails to load; ask for it once, then reload the images when it arrives.
 document.addEventListener('error', (e) => {
   const img = e.target;
+  if (img instanceof HTMLImageElement && img.dataset.mug) {
+    img.style.visibility = 'hidden';
+    const key = `mug:${img.dataset.mugteam}:${img.dataset.mug}`;
+    if (!logoAsked.has(key) && state && !state.halted) { logoAsked.add(key); bridge.request('data.get', { key }).catch(() => {}); }
+    return;
+  }
   if (!(img instanceof HTMLImageElement) || !img.dataset.logo) return;
   img.style.visibility = 'hidden';
   const key = `logo:${img.dataset.logo}${isDark() ? ':dark' : ''}`;
@@ -725,8 +736,15 @@ views.team = (k) => {
   const cs = get(tk);
   const pct3 = (v) => (v == null ? '' : v.toFixed(3).replace(/^0/, ''));
   const toiAvg = (sec) => (sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '');
-  const skaters = cs ? `<section class="card wide"><h2>Skaters <span class="muted small">season stats</span></h2><div class="tscroll"><table class="tbl"><thead><tr><th class="l">Skater</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>PIM</th><th>PPG</th><th>SOG</th><th>S%</th><th>TOI/GP</th><th>FO%</th></tr></thead><tbody>
-      ${(cs.skaters || []).slice().sort((a, b) => b.points - a.points || b.goals - a.goals).map((p) => `<tr><td class="l">${plink(p.playerId, `${esc(nm(p.firstName))} <b>${esc(nm(p.lastName))}</b>`)}</td><td>${esc(p.positionCode)}</td><td>${p.gamesPlayed}</td><td>${p.goals}</td><td>${p.assists}</td><td><b>${p.points}</b></td><td>${p.plusMinus > 0 ? '+' : ''}${p.plusMinus}</td><td>${p.penaltyMinutes}</td><td>${p.powerPlayGoals}</td><td>${p.shots}</td><td>${p.shootingPctg ? (p.shootingPctg * 100).toFixed(1) : '0.0'}</td><td>${toiAvg(p.avgTimeOnIcePerGame)}</td><td>${p.faceoffWinPctg ? Math.round(p.faceoffWinPctg * 100) + '%' : ''}</td></tr>`).join('')}</tbody></table></div>
+  if (get('espn:transactions') === undefined && !store.get('espn:transactions')?.asked) { store.set('espn:transactions', { asked: true }); bridge.request('data.get', { key: 'espn:transactions', cacheOnly: true }).catch(() => {}); }
+  const recentMoves = teamMoves(k, 40);
+  const injNames = new Set(injuryList().filter((i) => i.k === k).map((i) => fold(i.name)));
+  const isNew = (name) => recentMoves.some((t) => Date.now() - new Date(t.date) < 14 * 864e5 && /(Acquired|Claimed|Signed|Recalled|Activated)/.test(t.description) && t.description.includes(name.split(' ').at(-1)));
+  const ssT = seasonStats();
+  const tags = (p) => { const n = `${nm(p.firstName)} ${nm(p.lastName)}`; return `${isNew(n) ? ' <span class="chip new">New</span>' : ''}${injNames.has(fold(n)) ? ' <span class="chip tx-injury">Injured</span>' : ''}`; };
+  const pg = (v, gp) => (gp ? (v / gp).toFixed(2) : '');
+  const skaters = cs ? `<section class="card wide"><h2>Skaters <span class="muted small">season stats &middot; per game where marked</span></h2><div class="tscroll"><table class="tbl"><thead><tr><th class="l">Skater</th><th>Pos</th><th>GP</th><th>G</th><th>A</th><th>P</th><th>P/GP</th><th>+/-</th><th>PIM</th><th>PPG</th><th>SOG</th><th>SOG/GP</th><th>S%</th>${ssT ? '<th>HIT/GP</th><th>BLK/GP</th><th>TK/GP</th>' : ''}<th>TOI/GP</th><th>FO%</th></tr></thead><tbody>
+      ${(cs.skaters || []).slice().sort((a, b) => b.points - a.points || b.goals - a.goals).map((p) => { const sx = ssT?.skaters.find((x) => x.id === p.playerId); return `<tr><td class="l">${mug(p.playerId, k, 26)} ${plink(p.playerId, `${esc(nm(p.firstName))} <b>${esc(nm(p.lastName))}</b>`)}${tags(p)}</td><td>${esc(p.positionCode)}</td><td>${p.gamesPlayed}</td><td>${p.goals}</td><td>${p.assists}</td><td><b>${p.points}</b></td><td>${pg(p.points, p.gamesPlayed)}</td><td>${p.plusMinus > 0 ? '+' : ''}${p.plusMinus}</td><td>${p.penaltyMinutes}</td><td>${p.powerPlayGoals}</td><td>${p.shots}</td><td>${pg(p.shots, p.gamesPlayed)}</td><td>${p.shootingPctg ? (p.shootingPctg * 100).toFixed(1) : '0.0'}</td>${ssT ? `<td>${sx ? pg(sx.hit, sx.gp) : ''}</td><td>${sx ? pg(sx.blk, sx.gp) : ''}</td><td>${sx ? pg(sx.tk, sx.gp) : ''}</td>` : ''}<td>${toiAvg(p.avgTimeOnIcePerGame)}</td><td>${p.faceoffWinPctg ? Math.round(p.faceoffWinPctg * 100) + '%' : ''}</td></tr>`; }).join('')}</tbody></table></div>
       <div class="tscroll"><table class="tbl"><thead><tr><th class="l">Goalie</th><th>GP</th><th>GS</th><th>W</th><th>L</th><th>OTL</th><th>GAA</th><th>SV%</th><th>SA</th><th>SO</th></tr></thead><tbody>
       ${(cs.goalies || []).map((g) => `<tr><td class="l">${plink(g.playerId, `${esc(nm(g.firstName))} <b>${esc(nm(g.lastName))}</b>`)}</td><td>${g.gamesPlayed}</td><td>${g.gamesStarted}</td><td>${g.wins}</td><td>${g.losses}</td><td>${g.overtimeLosses}</td><td>${g.goalsAgainstAverage?.toFixed(2) ?? ''}</td><td>${pct3(g.savePercentage)}</td><td>${g.shotsAgainst}</td><td>${g.shutouts}</td></tr>`).join('')}</tbody></table></div></section>` : `<section class="card wide">${status(tk)}</section>`;
 
@@ -744,7 +762,9 @@ views.team = (k) => {
   if (get('espn:injuries') === undefined && !store.get('espn:injuries')?.asked) { store.set('espn:injuries', { asked: true }); bridge.request('data.get', { key: 'espn:injuries', cacheOnly: true }).catch(() => {}); }
   const inj = injuryList().filter((i) => i.k === k);
   const injCard = inj.length ? `<section class="card wide"><h2>Injuries <span class="muted small">ESPN, saved ${esc(ago(store.get('espn:injuries')?.at))}</span></h2>${injTable(inj, false)}</section>` : '';
-  return head + schedule + mp + injCard + skaters;
+  const mv = teamMoves(k, 10);
+  const txCard = mv.length ? `<section class="card wide"><h2>Transactions <span class="muted small">ESPN, saved ${esc(ago(store.get('espn:transactions')?.at))} &middot; <a class="tlink" href="#/transactions">all moves</a></span></h2>${mv.map((t) => `<div class="txrow"><span class="sdate">${esc(new Date(t.date).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>${txChip(t.kind)}<span class="txd">${esc(t.description)}</span></div>`).join('')}</section>` : '';
+  return head + schedule + mp + injCard + skaters + txCard;
 };
 
 
@@ -764,7 +784,7 @@ views.player = (id) => {
   const born = [nm(L.birthCity), nm(L.birthStateProvince), L.birthCountry].filter(Boolean).join(', ');
   const bio = [[isG ? 'Catches' : 'Shoots', L.shootsCatches], ['Age', age], ['Height', ht], ['Weight', L.weightInPounds ? `${L.weightInPounds} lb (${L.weightInKilograms} kg)` : ''], ['Born', `${L.birthDate || ''}${born ? ' · ' + born : ''}`], ['Draft', dr]]
     .filter(([, v]) => v).map(([k, v]) => `<div><small>${k}</small><span>${esc(v)}</span></div>`).join('');
-  const head = `<section class="card thead" style="--tc:${teamColor(team)}">${team ? `<a href="#/team/${team}">${logo(team, 'blogo')}</a>` : ''}
+  const head = `<section class="card thead" style="--tc:${teamColor(team)}">${mug(id, team, 96)}${team ? `<a href="#/team/${team}">${logo(team, 'blogo')}</a>` : ''}
       <div><div class="big2">${esc(nm(L.firstName))} ${esc(nm(L.lastName))} <span class="muted">#${L.sweaterNumber ?? ''}</span></div>
       <div class="muted">${esc({ C: 'Centre', L: 'Left wing', R: 'Right wing', D: 'Defence', G: 'Goalie' }[L.position] || L.position)}${team ? ` &middot; <a class="tlink" href="#/team/${team}">${esc(nm(L.fullTeamName) || team)}</a>` : L.isActive ? '' : ' &middot; Not active'}</div>
       <div class="bio">${bio}</div></div><button class="btn cmpbtn" type="button" data-cmp="player:${id}" title="Compare with another player">Compare</button></section>`;
@@ -1079,22 +1099,43 @@ views.rankings = () => {
 document.addEventListener('click', (e) => { const t = e.target.closest('[data-rktab]'); if (t) { rkTab = t.dataset.rktab; render(); } });
 document.addEventListener('change', (e) => { if (e.target.id === 'set-gradesearly') { try { localStorage.setItem('nhldash.gradesEarly', e.target.checked ? '1' : '0'); } catch { } render(); } });
 
-const ROOKIE_SCORE = 'Rookie score = 10 x (goals + 0.7 x assists + 0.1 x shots on goal + 0.1 x plus/minus) per game, so a point-a-game rookie lands near 10.';
+const ROOKIE_SCORE = 'Rookie score: each rookie\'s percentile among rookies with 3+ games in seven parts, weighted 30% Game Score per game (points per game until the season is synced), 20% Form, 15% points per game, 10% goals per game, 10% shots per game, 10% ice time per game, 5% plus/minus. 100 would be best in every part.';
 let rookieSort = 'score';
 views.rookies = () => {
   routeKeys = ['rookies'];
   want('rookies');
   const d = get('rookies');
   if (!d) return status('rookies') || '<div class="note">Loading...</div>';
-  const rows = (d.data || []).map((r) => ({ ...r, score: r.gamesPlayed ? 10 * (r.goals + 0.7 * r.assists + 0.1 * r.shots + 0.1 * r.plusMinus) / r.gamesPlayed : 0 }));
   const minGp = 3;
-  rows.sort((a, b) => (b[rookieSort] ?? 0) - (a[rookieSort] ?? 0));
-  const shown = rows.filter((r) => r.gamesPlayed >= minGp);
+  const ss = seasonStats();
+  const base = (d.data || []).filter((r) => r.gamesPlayed >= minGp).map((r) => {
+    const sx = ss?.skaters.find((x) => x.id === r.playerId);
+    const gp = r.gamesPlayed;
+    return { ...r, sx, parts: { gs: sx ? sx.gsAvg : r.points / gp, form: sx && showForm() ? sx.form : (sx ? sx.gsAvg : r.points / gp), ppg: r.points / gp, gpg: r.goals / gp, spg: r.shots / gp, toi: r.timeOnIcePerGame || 0, pm: r.plusMinus / gp } };
+  });
+  const W = { gs: 0.30, form: 0.20, ppg: 0.15, gpg: 0.10, spg: 0.10, toi: 0.10, pm: 0.05 };
+  const pr = (k, v) => { const all = base.map((x) => x.parts[k]); return 100 * all.filter((x) => x < v).length / Math.max(1, all.length - 1); };
+  for (const r of base) r.score = Object.entries(W).reduce((a, [k, w]) => a + w * pr(k, r.parts[k]), 0);
+  // Drafted column: from each rookie's NHL player page, loaded only on request ("Load draft info").
+  for (const r of base) if (get(`player:${r.playerId}`) === undefined && !store.get(`player:${r.playerId}`)?.asked) { store.set(`player:${r.playerId}`, { asked: true }); bridge.request('data.get', { key: `player:${r.playerId}`, cacheOnly: true }).catch(() => {}); }
+  const draft = (r) => { const dd = get(`player:${r.playerId}`)?.draftDetails; return get(`player:${r.playerId}`) ? (dd ? `R${dd.round} #${dd.overallPick} ${dd.teamAbbrev}` : 'Undrafted') : ''; };
+  const missing = base.filter((r) => !get(`player:${r.playerId}`)).length;
+  const sorted = base.slice().sort((a, b) => (rookieSort === 'score' ? b.score - a.score : (b[rookieSort] ?? 0) - (a[rookieSort] ?? 0)));
+  const podium = base.slice().sort((a, b) => b.score - a.score).slice(0, 3);
   const th = (k, l) => `<th class="sortable${rookieSort === k ? ' sorted' : ''}" data-rk="${k}">${l}${rookieSort === k ? ' &darr;' : ''}</th>`;
   const toiAvg = (sec) => (sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '');
-  return `<section class="card wide"><h2>Rookie watch <span class="muted small">skaters with ${minGp}+ games &middot; <span class="hint" title="${esc(ROOKIE_SCORE)}">rookie score</span></span></h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th class="l">Rookie</th><th>Team</th><th>Pos</th>${th('gamesPlayed', 'GP')}${th('goals', 'G')}${th('assists', 'A')}${th('points', 'P')}${th('plusMinus', '+/-')}${th('ppPoints', 'PPP')}${th('shots', 'SOG')}${th('timeOnIcePerGame', 'TOI/GP')}${th('score', 'Rookie score')}</tr></thead><tbody>
-    ${shown.map((r, i) => `<tr class="${favs().has(r.teamAbbrevs) ? 'fav' : ''}"><td>${i + 1}</td><td class="l">${plink(r.playerId, esc(r.skaterFullName))}</td><td>${esc(r.teamAbbrevs)}</td><td>${esc(r.positionCode)}</td><td>${r.gamesPlayed}</td><td>${r.goals}</td><td>${r.assists}</td><td><b>${r.points}</b></td><td>${r.plusMinus > 0 ? '+' : ''}${r.plusMinus}</td><td>${r.ppPoints}</td><td>${r.shots}</td><td>${toiAvg(r.timeOnIcePerGame)}</td><td><b>${r.score.toFixed(1)}</b></td></tr>`).join('') || '<tr><td colspan="13" class="muted l">No rookies with enough games yet.</td></tr>'}</tbody></table></div><p class="muted small">${esc(ROOKIE_SCORE)} Rookie list from the NHL stats API.</p></section>`;
+  return `<div class="podium">${podium.map((r, i) => `<a class="podc${i === 0 ? ' first' : ''}" href="#/player/${r.playerId}"><span class="pogr">${i + 1}${['st', 'nd', 'rd'][i]}</span>${mug(r.playerId, r.teamAbbrevs, 72)}<b>${esc(r.skaterFullName)}</b><small class="muted">${esc(r.teamAbbrevs)} &middot; ${esc(r.positionCode)} &middot; ${r.goals} G ${r.assists} A in ${r.gamesPlayed}</small><span class="pogv">${r.score.toFixed(0)}</span></a>`).join('')}</div>
+    <section class="card wide"><h2>Rookie watch <span class="muted small">skaters with ${minGp}+ games &middot; <span class="hint" data-gloss="Rookie score">rookie score</span></span></h2>
+    ${missing ? `<div class="actions"><button id="rk-drafts" class="btn" type="button"${state.halted ? ' disabled' : ''}>Load draft info (${missing} requests)</button><span class="muted small">One request a second, saved on this computer.</span></div>` : ''}
+    <div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th class="l">Rookie</th><th>Team</th><th>Pos</th><th class="l">Drafted</th>${th('gamesPlayed', 'GP')}${th('goals', 'G')}${th('assists', 'A')}${th('points', 'P')}${th('plusMinus', '+/-')}${th('ppPoints', 'PPP')}${th('shots', 'SOG')}${th('timeOnIcePerGame', 'TOI/GP')}${th('score', 'Rookie score')}</tr></thead><tbody>
+    ${sorted.map((r, i) => `<tr class="${favs().has(r.teamAbbrevs) ? 'fav' : ''}"><td>${i + 1}</td><td class="l">${plink(r.playerId, esc(r.skaterFullName))}</td><td>${esc(r.teamAbbrevs)}</td><td>${esc(r.positionCode)}</td><td class="l small">${esc(draft(r))}</td><td>${r.gamesPlayed}</td><td>${r.goals}</td><td>${r.assists}</td><td><b>${r.points}</b></td><td>${r.plusMinus > 0 ? '+' : ''}${r.plusMinus}</td><td>${r.ppPoints}</td><td>${r.shots}</td><td>${toiAvg(r.timeOnIcePerGame)}</td><td><b>${r.score.toFixed(0)}</b></td></tr>`).join('') || '<tr><td colspan="14" class="muted l">No rookies with enough games yet.</td></tr>'}</tbody></table></div><p class="muted small">Rookie list from the NHL stats API.</p></section>`;
 };
+document.addEventListener('click', async (e) => {
+  if (e.target.id !== 'rk-drafts') return;
+  const ids = (get('rookies')?.data || []).map((r) => r.playerId).filter((id) => !get(`player:${id}`));
+  for (const id of ids) store.delete(`player:${id}`);
+  try { const n = await bridge.request('players.fetch', { ids }); alertNote(`Loading draft info for ${n} rookies, one a second.`); } catch (err) { alertNote(err.message); }
+});
 document.addEventListener('click', (e) => { const h = e.target.closest('[data-rk]'); if (h) { rookieSort = h.dataset.rk; render(); } });
 
 views.eastwest = () => {
@@ -1156,10 +1197,14 @@ let cmp = (() => { try { return JSON.parse(localStorage.getItem('cmp')) || { typ
 function saveCmp() { try { localStorage.setItem('cmp', JSON.stringify(cmp)); } catch { } renderCmpBar(); }
 function addCmp(type, id) {
   if (cmp.type !== type) cmp = { type, ids: [] };
-  if (!cmp.ids.includes(id)) cmp.ids = [...cmp.ids, id].slice(-2);
+  const max = type === 'team' ? 2 : COMPARE_MAX;
+  if (cmp.ids.includes(id)) cmp.ids = cmp.ids.filter((x) => x !== id);
+  else if (cmp.ids.length >= max) { alertNote(`You can compare up to ${max} ${type === 'team' ? 'teams' : 'players'}.`); return; }
+  else cmp.ids = [...cmp.ids, id];
   saveCmp();
-  if (cmp.ids.length === 2) location.hash = `#/compare/${type}/${cmp.ids[0]}/${cmp.ids[1]}`;
+  if (type === 'team' && cmp.ids.length === 2) location.hash = `#/compare/team/${cmp.ids[0]}/${cmp.ids[1]}`;
 }
+const COMPARE_MAX = 5;
 function cmpName(type, id) {
   if (type === 'team') return TEAMS[id] || id;
   const L = get(`player:${id}`);
@@ -1170,7 +1215,7 @@ function renderCmpBar() {
   el.hidden = !cmp.ids.length || parseRoute().view === 'compare';
   if (el.hidden) return;
   el.innerHTML = `<span class="muted small">Compare:</span>${cmp.ids.map((id) => `<span class="favchip">${esc(cmpName(cmp.type, id))} <button type="button" class="xbtn" data-cmpx="${id}" aria-label="Remove">&times;</button></span>`).join('')}
-    <span class="muted small">${cmp.ids.length < 2 ? `pick one more ${cmp.type}` : ''}</span><button type="button" class="xbtn" data-cmpx="*" title="Clear">Clear</button>`;
+    <span class="muted small">${cmp.ids.length < 2 ? `pick one more ${cmp.type}` : ''}</span><button type="button" class="btn small-btn" data-cmpx="*" title="Clear">Clear</button>${cmp.ids.length >= 2 ? `<a class="btn primary small-btn" href="#/compare/${cmp.type}/${cmp.ids.join('/')}">Compare (${cmp.ids.length})</a>` : ''}`;
 }
 document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-cmp]');
@@ -1199,18 +1244,26 @@ views.compare = (arg) => {
     return `<section class="card cmp"><div class="cmphead"><a href="#/team/${a}">${logo(a, 'blogo')}<b>${esc(TEAMS[a] || a)}</b></a><span class="muted">vs</span><a href="#/team/${b}">${logo(b, 'blogo')}<b>${esc(TEAMS[b] || b)}</b></a></div>${rows.join('')}
       <h3 class="sub">Head to head this season</h3>${h2h.length ? h2h.map((g) => `<a class="sline" href="#/game/${g.id}"><span class="sdate">${esc(new Date(g.date + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span><span>${esc(g.awayTeam.abbrev)} ${g.awayTeam.score} @ ${esc(g.homeTeam.abbrev)} ${g.homeTeam.score}</span><span class="sres muted">${esc(gameStatus(g))}</span></a>`).join('') : `<p class="muted">${weekList().length ? 'No meetings yet.' : 'Sync the season to see their meetings.'}</p>`}</section>`;
   }
-  routeKeys = [`player:${a}`, `player:${b}`]; routeKeys.forEach((k) => want(k));
-  const A = get(`player:${a}`), B = get(`player:${b}`);
-  if (!A || !B) return status(`player:${a}`) || status(`player:${b}`) || '<div class="note">Loading...</div>';
-  const sa = A.featuredStats?.regularSeason?.subSeason || {}, sb = B.featuredStats?.regularSeason?.subSeason || {};
-  const ca = A.careerTotals?.regularSeason || {}, cb = B.careerTotals?.regularSeason || {};
-  const goalie = A.position === 'G' && B.position === 'G';
-  const head = `<div class="cmphead">${[[a, A], [b, B]].map(([id, P]) => `<a href="#/player/${id}">${logo(P.currentTeamAbbrev, 'blogo')}<b>${esc(nm(P.firstName))} ${esc(nm(P.lastName))}</b><small class="muted">${esc(P.position)} &middot; ${esc(P.currentTeamAbbrev || '')}</small></a>`).join('<span class="muted">vs</span>')}</div>`;
+  // Players: up to 5 side by side, on this season, last season or career (the basis switch is remembered).
+  const ids = arg.split('/').slice(1);
+  routeKeys = ids.map((i) => `player:${i}`); routeKeys.forEach((k) => want(k));
+  const Ps = ids.map((i) => get(`player:${i}`));
+  if (Ps.some((x) => !x)) return ids.map((i) => status(`player:${i}`)).find(Boolean) || '<div class="note">Loading...</div>';
+  const goalie = Ps.every((x) => x.position === 'G');
+  const prevSeason = (P) => { const cur = P.featuredStats?.season; const rows = (P.seasonTotals || []).filter((t) => t.leagueAbbrev === 'NHL' && t.gameTypeId === 2 && t.season < cur); const last = rows.at(-1)?.season; return rows.filter((t) => t.season === last).reduce((acc, t) => { for (const [k, v] of Object.entries(t)) if (typeof v === 'number' && !['season', 'sequence', 'gameTypeId'].includes(k)) acc[k] = (acc[k] || 0) + v; return acc; }, {}); };
+  const pick = (P) => cmpBasis === 'career' ? (P.careerTotals?.regularSeason || {}) : cmpBasis === 'prev' ? prevSeason(P) : (P.featuredStats?.regularSeason?.subSeason || {});
+  const S2 = Ps.map(pick);
   const rows = goalie
-    ? [bar('Games', sa.gamesPlayed, sb.gamesPlayed), bar('Wins', sa.wins, sb.wins), bar('Save %', sa.savePctg, sb.savePctg, p3), bar('Goals against avg.', sa.goalsAgainstAvg, sb.goalsAgainstAvg, (v) => Number(v).toFixed(2), true), bar('Shutouts', sa.shutouts, sb.shutouts), bar('Career wins', ca.wins, cb.wins), bar('Career save %', ca.savePctg, cb.savePctg, p3)]
-    : [bar('Games', sa.gamesPlayed, sb.gamesPlayed), bar('Goals', sa.goals, sb.goals), bar('Assists', sa.assists, sb.assists), bar('Points', sa.points, sb.points), bar('Points per game', sa.gamesPlayed ? sa.points / sa.gamesPlayed : 0, sb.gamesPlayed ? sb.points / sb.gamesPlayed : 0, (v) => Number(v).toFixed(2)), bar('Plus/minus', sa.plusMinus, sb.plusMinus), bar('Power-play points', sa.powerPlayPoints, sb.powerPlayPoints), bar('Shots', sa.shots, sb.shots), bar('Career points', ca.points, cb.points), bar('Career goals', ca.goals, cb.goals)];
-  return `<section class="card cmp">${head}<h3 class="sub">This season${goalie ? '' : ' and career'}</h3>${rows.join('')}</section>`;
+    ? [['Games', (x) => x.gamesPlayed], ['Wins', (x) => x.wins], ['Save %', (x) => x.savePctg, 3], ['Goals against avg.', (x) => x.goalsAgainstAvg ?? x.goalsAgainstAverage, 2, true], ['Shutouts', (x) => x.shutouts]]
+    : [['Games', (x) => x.gamesPlayed], ['Goals', (x) => x.goals], ['Assists', (x) => x.assists], ['Points', (x) => x.points], ['Points per game', (x) => (x.gamesPlayed ? x.points / x.gamesPlayed : null), 2], ['Plus/minus', (x) => x.plusMinus], ['Power-play points', (x) => x.powerPlayPoints], ['Shots', (x) => x.shots], ['Shooting %', (x) => (x.shootingPctg != null ? x.shootingPctg * 100 : null), 1], ['Game-winning goals', (x) => x.gameWinningGoals]];
+  const fmt = (v, dec) => (v == null || isNaN(v) ? '-' : dec === 3 ? Number(v).toFixed(3).replace(/^0/, '') : dec ? Number(v).toFixed(dec) : v);
+  const basis = (k, l) => `<button type="button" class="seg${cmpBasis === k ? ' on' : ''}" data-cmpbasis="${k}">${l}</button>`;
+  return `<div class="segs bar1">${basis('current', 'This season')}${basis('prev', 'Last season')}${basis('career', 'Career')}<span class="muted small push">Regular season, NHL only</span></div>
+    <section class="card wide"><div class="tscroll"><table class="tbl cmptbl"><thead><tr><th class="l"></th>${Ps.map((P, i) => `<th><a class="cmpp" href="#/player/${ids[i]}">${mug(ids[i], P.currentTeamAbbrev, 56)}<b>${esc(nm(P.firstName))} ${esc(nm(P.lastName))}</b><small class="muted">${esc(P.position)} &middot; ${esc(P.currentTeamAbbrev || '')}</small></a></th>`).join('')}</tr></thead><tbody>
+    ${rows.map(([l, f, dec, low]) => { const vals = S2.map((x) => f(x)); const nums = vals.filter((v) => v != null && !isNaN(v)); const best = nums.length > 1 ? (low ? Math.min(...nums) : Math.max(...nums)) : null; return `<tr><td class="l">${esc(l)}</td>${vals.map((v) => `<td class="${v != null && best != null && v === best ? 'best' : ''}">${fmt(v, dec)}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div></section>`;
 };
+let cmpBasis = (() => { try { return localStorage.getItem('nhldash.cmpBasis') || 'current'; } catch { return 'current'; } })();
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-cmpbasis]'); if (b) { cmpBasis = b.dataset.cmpbasis; try { localStorage.setItem('nhldash.cmpBasis', cmpBasis); } catch { } render(); } });
 
 
 // ------------------------------------------------------------------ moves: transactions, injuries, free agents (ESPN, fetched when opened)
@@ -1221,6 +1274,8 @@ const movesTabs = (on) => `<div class="segs bar1">${[['transactions', 'Transacti
 let txFilter = { team: '', q: '' };
 let txShow = 60;
 document.addEventListener('click', (e) => { if (e.target.id === 'tx-more') { txShow += 120; render(); } });
+const txChip = (k) => `<span class="chip tx-${({ Trade: 'trade', Signing: 'signed', Release: 'released', Waivers: 'waivers', Injury: 'injury' })[k] || 'other'}">${esc(k === 'Signing' ? 'Signed' : k === 'Release' ? 'Released' : k)}</span>`;
+function teamMoves(k, n = 10) { return (get('espn:transactions')?.transactions || []).map((t) => ({ ...t, k: espnTeam(t.team), kind: moveKind(t.description) })).filter((t) => t.k === k).slice(0, n); }
 function moveKind(d) {
   if (/traded|acquired/i.test(d)) return 'Trade';
   if (/waiver/i.test(d)) return 'Waivers';
@@ -1239,7 +1294,7 @@ views.transactions = () => {
     .filter((t) => (!txFilter.team || t.k === txFilter.team) && (!q || t.description.toLowerCase().includes(q)));
   return movesTabs('transactions') + `<section class="card wide"><div class="filters"><select id="tx-team"><option value="">All teams</option>${Object.entries(TEAMS).map(([k, v]) => `<option value="${k}"${txFilter.team === k ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
       <input id="tx-q" type="search" placeholder="Filter (a name, 'waivers', 'trade')" value="${esc(txFilter.q)}"><span class="muted small">${rows.length} moves</span></div>
-    ${rows.slice(0, txShow).map((t) => `<div class="txrow${favs().has(t.k) ? ' fav' : ''}"><span class="sdate">${esc(new Date(t.date).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>${t.k ? `<a href="#/team/${t.k}">${logo(t.k, 'slogo')}</a>` : ''}<span class="tag">${esc(t.kind)}</span><span class="txd">${esc(t.description)}</span></div>`).join('') || '<p class="muted">No moves match.</p>'}${rows.length > txShow ? `<div class="actions"><button class="btn" type="button" id="tx-more">Show more (${rows.length - txShow} left)</button></div>` : ''}</section>`;
+    ${rows.slice(0, txShow).map((t) => `<div class="txrow${favs().has(t.k) ? ' fav' : ''}"><span class="sdate">${esc(new Date(t.date).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>${t.k ? `<a href="#/team/${t.k}">${logo(t.k, 'slogo')}</a>` : ''}${txChip(t.kind)}<span class="txd">${esc(t.description)}</span></div>`).join('') || '<p class="muted">No moves match.</p>'}${rows.length > txShow ? `<div class="actions"><button class="btn" type="button" id="tx-more">Show more (${rows.length - txShow} left)</button></div>` : ''}</section>`;
 };
 document.addEventListener('change', (e) => { if (e.target.id === 'tx-team') { txFilter.team = e.target.value; render(); } });
 document.addEventListener('input', (e) => { if (e.target.id === 'tx-q') { txFilter.q = e.target.value; clearTimeout(views._t); views._t = setTimeout(render, 250); } });
@@ -1281,23 +1336,44 @@ function freeAgents() {
   }
   return [...fa.values()].sort((a, b) => b.date.localeCompare(a.date));
 }
+let faSort = (() => { try { return localStorage.getItem('nhldash.faSort') || 'recent'; } catch { return 'recent'; } })();
+const faNotes = (() => { try { return JSON.parse(localStorage.getItem('nhldash.faNotes')) || {}; } catch { return {}; } })();
+let faDismissed = (() => { try { return JSON.parse(localStorage.getItem('nhldash.faDismissed')) || []; } catch { return []; } })();
+// Watched players who have signed or been claimed since: shown as a notice until dismissed.
+function faSigned() {
+  const tx = get('espn:transactions')?.transactions || [];
+  const fa = new Set(freeAgents().map((p) => p.name));
+  return faWatch.filter((n) => !fa.has(n) && !faDismissed.includes(n)).map((n) => ({ n, t: tx.find((t) => t.description.includes(n) && /(Signed|Claimed|Acquired|Agreed)/.test(t.description)) })).filter((x) => x.t);
+}
 views.freeagents = () => {
   routeKeys = ['espn:transactions']; want('espn:transactions');
   if (!get('espn:transactions')) return movesTabs('freeagents') + (status('espn:transactions') || '<div class="note">Loading...</div>');
-  const list = freeAgents();
+  const ss = seasonStats();
+  const useful = (p) => { const x = ss?.skaters.find((y) => y.name.split(' ').at(-1) === p.name.split(' ').at(-1) && y.name[0] === p.name[0]); return x ? x.gs : -1; };
+  let list = freeAgents();
+  if (faSort === 'useful') list = list.map((p) => ({ ...p, u: useful(p) })).sort((a, b) => b.u - a.u);
   const watched = list.filter((p) => faWatch.includes(p.name));
-  const row = (p) => `<tr><td class="l"><button class="star${faWatch.includes(p.name) ? ' on' : ''}" type="button" data-fa="${esc(p.name)}" title="Watch list">${faWatch.includes(p.name) ? '★' : '☆'}</button> <b>${esc(p.name)}</b></td><td class="l">${p.k ? `${logo(p.k, 'slogo')} ${esc(p.k)}` : ''}</td><td class="l">${esc(p.why)}</td><td>${esc(new Date(p.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</td></tr>`;
-  const head = '<thead><tr><th class="l">Player</th><th class="l">Last team</th><th class="l">How</th><th>Date</th></tr></thead>';
-  return movesTabs('freeagents') + (watched.length ? `<section class="card wide"><h2>Watch list</h2><table class="tbl">${head}<tbody>${watched.map(row).join('')}</tbody></table></section>` : '') +
-    `<section class="card wide"><h2>Free agents <span class="muted small">${list.length} players</span></h2><p class="muted small">Players the transaction log shows as released, waived to end their contract, or let go from a tryout, with no later signing or claim. Built from the log, so it can miss moves the log does not mention.</p><table class="tbl">${head}<tbody>${list.map(row).join('')}</tbody></table></section>`;
+  const signed = faSigned();
+  const row = (p) => `<tr><td class="l"><button class="star${faWatch.includes(p.name) ? ' on' : ''}" type="button" data-fa="${esc(p.name)}" title="Watch list">${faWatch.includes(p.name) ? '★' : '☆'}</button> <b>${esc(p.name)}</b></td><td class="l">${p.k ? `${logo(p.k, 'slogo')} ${esc(p.k)}` : ''}</td><td class="l">${esc(p.why)}</td><td>${esc(new Date(p.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</td><td class="l"><input class="fanote" type="text" maxlength="120" placeholder="Note" data-fanote="${esc(p.name)}" value="${esc(faNotes[p.name] || '')}"></td></tr>`;
+  const head = '<thead><tr><th class="l">Player</th><th class="l">Last team</th><th class="l">How</th><th>Date</th><th class="l">Note</th></tr></thead>';
+  const srt = (k, l) => `<button type="button" class="seg${faSort === k ? ' on' : ''}" data-fasort="${k}">${l}</button>`;
+  return movesTabs('freeagents') +
+    signed.map((x) => `<div class="note fasigned"><b>${esc(x.n)}</b> from your watch list has a new team: ${esc(x.t.description)} <button class="btn small-btn" type="button" data-fadismiss="${esc(x.n)}">Dismiss</button></div>`).join('') +
+    (watched.length ? `<section class="card wide"><h2>Watch list</h2><table class="tbl">${head}<tbody>${watched.map(row).join('')}</tbody></table></section>` : '') +
+    `<section class="card wide"><h2>Free agents <span class="muted small">${list.length} players</span></h2><div class="segs">${srt('recent', 'Recently released')}${srt('useful', 'Most useful')}</div><p class="muted small">Players the transaction log shows as released, waived to end their contract, or let go from a tryout, with no later signing or claim. Built from ESPN's full-year log (one request), so it can miss moves the log does not mention. Most useful ranks by season Game Score from the saved box scores.</p><div class="tscroll"><table class="tbl">${head}<tbody>${list.map(row).join('')}</tbody></table></div></section>`;
 };
 document.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-fa]'); if (!b) return;
-  const n = b.dataset.fa; faWatch = faWatch.includes(n) ? faWatch.filter((x) => x !== n) : [...faWatch, n];
-  try { localStorage.setItem('faWatch', JSON.stringify(faWatch)); } catch { }
-  render();
+  const b = e.target.closest('[data-fa]');
+  if (b) { const n = b.dataset.fa; faWatch = faWatch.includes(n) ? faWatch.filter((x) => x !== n) : [...faWatch, n]; try { localStorage.setItem('faWatch', JSON.stringify(faWatch)); } catch { } render(); return; }
+  const so = e.target.closest('[data-fasort]');
+  if (so) { faSort = so.dataset.fasort; try { localStorage.setItem('nhldash.faSort', faSort); } catch { } render(); return; }
+  const d = e.target.closest('[data-fadismiss]');
+  if (d) { faDismissed.push(d.dataset.fadismiss); try { localStorage.setItem('nhldash.faDismissed', JSON.stringify(faDismissed)); } catch { } render(); }
 });
-
+document.addEventListener('change', (e) => {
+  const n = e.target.dataset?.fanote; if (n == null) return;
+  faNotes[n] = e.target.value.slice(0, 120); try { localStorage.setItem('nhldash.faNotes', JSON.stringify(faNotes)); } catch { }
+});
 
 // ------------------------------------------------------------------ game flow (from the play-by-play already loaded for the shot map)
 function gameFlow(p) {
@@ -1509,7 +1585,7 @@ function parseRoute() {
   if (h === '#/rankings') return { view: 'rankings', tab: 'rankings' };
   if (h === '#/rookies') return { view: 'rookies', tab: 'rookies' };
   if (h === '#/eastwest') return { view: 'eastwest', tab: 'rankings' };
-  if ((m = h.match(/^#\/compare\/((?:team\/[A-Z]{3}\/[A-Z]{3})|(?:player\/\d{7,8}\/\d{7,8}))$/))) return { view: 'compare', arg: m[1], tab: '' };
+  if ((m = h.match(/^#\/compare\/((?:team\/[A-Z]{3}\/[A-Z]{3})|(?:player(?:\/\d{7,8}){2,5}))$/))) return { view: 'compare', arg: m[1], tab: '' };
   if (h === '#/transactions') return { view: 'transactions', tab: 'moves' };
   if (h === '#/injuries') return { view: 'injuries', tab: 'moves' };
   if (h === '#/freeagents') return { view: 'freeagents', tab: 'moves' };

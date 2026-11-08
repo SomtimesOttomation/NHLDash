@@ -132,6 +132,10 @@ function Resolve-DataKey {
         $q = $Matches[1]; $safe = ($q -replace '[^a-z]', '_')
         return @{ Key = $k; Url = 'https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=20&q=' + [uri]::EscapeDataString($q); File = "psearch/$safe.json"; Kind = 'json'; Ttl = 86400 }
     }
+    if ($k -cmatch '^mug:([A-Z]{3}):(\d{7,8})$') {
+        # Player pictures, saved on this computer like the logos (one download per player, kept 30 days).
+        return @{ Key = $k; Url = "https://assets.nhle.com/mugs/nhl/$(Get-SeasonId)/$($Matches[1])/$($Matches[2]).png"; File = "mugs/$($Matches[2]).png"; Kind = 'png'; Ttl = 2592000 }
+    }
     if ($k -eq 'seasonbox') { return @{ Key = $k; Url = ''; File = 'season-box.json'; Kind = 'json'; Ttl = 0; Local = $true } }
     if ($k -eq 'standings') { return @{ Key = $k; Url = $script:NhlApi + 'standings/now'; File = 'standings.json'; Kind = 'json'; Ttl = 600 } }
     if ($k -eq 'leaders') {
@@ -347,6 +351,11 @@ $script:WorkerScript = {
                     $text = Select-MoneyPuck ($utf8.GetString($bytes)) $item.Key
                     [IO.File]::WriteAllText($path, $text, $utf8)
                     $Out.Enqueue($head + (ConvertTo-Json -InputObject $text -Compress) + '}}')
+                }
+                'png' {
+                    if ($bytes.Length -lt 8 -or $bytes[0] -ne 0x89 -or $bytes[1] -ne 0x50) { throw 'Picture download was not a PNG.' }
+                    [IO.File]::WriteAllBytes($path, $bytes)
+                    $Out.Enqueue($head + 'null}}')
                 }
                 default {
                     $text = $utf8.GetString($bytes)
@@ -706,6 +715,18 @@ function Invoke-DashCommand {
             'sync.status' {
                 $sh = $script:Shared
                 Reply $id (ConvertTo-Json @{ running = [bool]$sh.SyncActive; done = [int]$sh.SyncDone; total = [int]$sh.SyncTotal; note = [string]$sh.SyncNote; savedGames = @(Get-ChildItem -LiteralPath (Join-Path $script:CacheDir 'boxc') -Filter '*.json' -File -ErrorAction SilentlyContinue).Count } -Compress)
+            }
+            'players.fetch' {
+                # Opt-in bulk download (for example draft info for every rookie): one request per second.
+                $n = 0
+                foreach ($pl in @($a.ids | Select-Object -First 120)) {
+                    if ([string]$pl -notmatch '^\d{7,8}$') { continue }
+                    $spec = Resolve-DataKey ("player:$pl")
+                    if ($null -ne (Get-CacheAge $spec.File)) { continue }
+                    if ((Request-Data $spec $false @{ Delay = 1000 }) -eq 'queued') { $n++ }
+                }
+                Start-WorkerRunspace
+                Reply $id ([string]$n)
             }
             'schedule.get' { Reply $id (ConvertTo-PageJson (Get-NightlyTask)) }
             'schedule.set' {
