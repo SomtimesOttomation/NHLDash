@@ -870,7 +870,7 @@ function renderWeekBar(activeN) {
   el.innerHTML = `<span class="weekbar-label">Season</span>
     <button class="btn small-btn" type="button" id="btn-sync"${s?.running || state.halted ? ' disabled' : ''}>${s?.running ? `Syncing ${s.pct}%` : weeks.length ? 'Sync season' : 'Sync the season'}</button>
     ${weeks.map((w) => `<a class="weeklink${w.n === activeN ? ' active' : ''}" href="#/week/${w.n}" title="${esc(weekRange(w.monday))}">Week ${w.n}</a>`).join('')}
-    ${!weeks.length && season.loaded ? '<span class="muted small">Sync once to unlock week pages, power rankings, rookies and the East-West report.</span>' : ''}`;
+    ${!weeks.length && season.loaded ? '<span class="muted small">Sync once to unlock week pages, power rankings, players of the week, Leaders and Losers and the Eastern-Western Report.</span>' : ''}`;
 }
 function weekRange(monday) {
   const a = new Date(monday + 'T12:00:00'), b = new Date(a); b.setDate(b.getDate() + 6);
@@ -1465,6 +1465,14 @@ const GLOSS = {
   'Conference rating': 'The average SRS-style rating of each conference\'s teams.',
   'Top 10': 'How many of the league\'s 10 best teams by rating play in each conference.',
   'Seed by seed': 'East and West teams at the same place in their conference standings, side by side; the better-rated one is highlighted.',
+  PPG: 'Power-play goals.',
+  'P/GP': 'Points per game played.',
+  'SOG/GP': 'Shots on goal per game.',
+  'HIT/GP': 'Hits per game (from the saved box scores).',
+  'BLK/GP': 'Blocked shots per game (from the saved box scores).',
+  'TK/GP': 'Takeaways per game (from the saved box scores).',
+  'GD/GP': 'Goal difference per game played.',
+  'xGF-xGA': 'Expected goals for and against (MoneyPuck).',
   'P%': 'Points percentage: points earned / points possible (2 per game).',
   RW: 'Regulation wins: the first tiebreaker in the standings.',
   'GD/GP': 'Goal difference per game played.',
@@ -1483,22 +1491,45 @@ const GLOSS = {
   OTL: 'Overtime and shootout losses (worth 1 point).',
   L10: 'Record in the last 10 games (W-L-OTL).',
 };
+// The formula part of a hover card, shown in a monospace block (NBADash style).
+const GLOSS_F = {
+  'Game score': 'GS = 0.75 G + 0.625 A + 0.075 SOG + 0.05 BLK - 0.075 PIM + 0.15 (+/-)\nGoalie GS = 0.1 SV - 0.75 GA',
+  Form: 'P = P + 0.015;  K = P / (P + 0.85)\nForm = Form + K (GS - Form);  P = P (1 - K)',
+  SRS: 'SRS = GD/GP + avg(opponent SRS), repeated until stable, centred on 0',
+  'Remaining SoS': 'avg over games left of: opponent SRS + 0.10 (road) + 0.15 (2nd night)',
+  'Rookie score': '0.30 GS/GP + 0.20 Form + 0.15 P/GP + 0.10 G/GP\n+ 0.10 SOG/GP + 0.10 TOI/GP + 0.05 (+/-)/GP   (each as a percentile)',
+  Score: '45% P% + 25% scaled GD/GP + 15% last-10 P% + 15% SOS (or xGF%)',
+  'xGF%': 'xGF / (xGF + xGA)',
+  GSAx: 'xGA - GA',
+  'Goals saved above average': 'league SV% x SA - GA',
+  'P%': 'points / (2 x GP)',
+  'S%': 'G / SOG',
+  'SV%': 'saves / shots on goal',
+  GAA: 'GA x 60 / minutes played',
+  'G-xG': 'G - xG',
+};
 function addGloss(root) {
   root.querySelectorAll('th, .kpis small, .cmpmid small').forEach((el) => {
     const key = el.textContent.replace(/[↑↓]/g, '').trim();
     if (GLOSS[key]) { el.dataset.gloss = key; el.classList.add('hint'); }
   });
+  // every hover card is also reachable with the keyboard
+  root.querySelectorAll('[data-gloss]').forEach((el) => { if (!el.hasAttribute('tabindex') && !/^(A|BUTTON|INPUT)$/.test(el.tagName)) el.tabIndex = 0;
+  });
 }
 const tip = document.createElement('div'); tip.className = 'tipcard'; tip.hidden = true; document.body.append(tip);
-document.addEventListener('mouseover', (e) => {
-  const el = e.target.closest('[data-gloss]');
-  if (!el) { tip.hidden = true; return; }
-  tip.innerHTML = `<b>${esc(el.dataset.gloss)}</b><div>${esc(GLOSS[el.dataset.gloss])}</div>`;
+function showTip(el) {
+  if (!el || !GLOSS[el.dataset.gloss]) { tip.hidden = true; return; }
+  const f = GLOSS_F[el.dataset.gloss];
+  tip.innerHTML = `<b>${esc(el.dataset.gloss)}</b><div>${esc(GLOSS[el.dataset.gloss])}</div>${f ? `<pre>${esc(f)}</pre>` : ''}`;
   tip.hidden = false;
   const r = el.getBoundingClientRect();
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 328, r.left + r.width / 2 - 160))}px`;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 428, r.left + r.width / 2 - 210))}px`;
   tip.style.top = `${r.bottom + 8 + window.scrollY}px`;
-});
+}
+document.addEventListener('mouseover', (e) => showTip(e.target.closest('[data-gloss]')));
+document.addEventListener('focusin', (e) => showTip(e.target.closest?.('[data-gloss]')));
+document.addEventListener('focusout', () => { tip.hidden = true; });
 
 // ------------------------------------------------------------------ updates (same window and steps as NBADash)
 const upd = { phase: 'idle', info: null, pct: 0, text: '', error: '' };
