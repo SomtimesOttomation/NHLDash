@@ -304,13 +304,14 @@ views.standings = (hl) => {
   const order = Object.keys(groups).sort();
   const seg = (v, l) => `<button type="button" class="seg${standMode === v ? ' on' : ''}" data-stand="${v}">${l}</button>`;
   return `<div class="segs bar1">${seg('division', 'Division')}${seg('conference', 'Conference')}${seg('league', 'League')}
-      <span class="muted small push">Updated ${esc(ago(store.get('standings')?.at))}</span><a class="btn small-btn" href="#/eastwest">East-West report</a></div>
+      <span class="muted small push">Updated ${esc(ago(store.get('standings')?.at))}</span><a class="btn small-btn" href="#/eastwest">Eastern-Western Report</a></div>
     <div class="grid two stand">${order.map((gname) => `<section class="card"><h2>${esc(gname)}</h2><div class="tscroll"><table class="tbl">
       <thead><tr><th></th><th class="l">Team</th><th>GP</th><th>W</th><th>L</th><th>OTL</th><th>PTS</th><th>P%</th><th>RW</th><th>GF</th><th>GA</th><th>DIFF</th><th>L10</th><th>STRK</th></tr></thead><tbody>
-      ${groups[gname].sort((a, b) => a[seq] - b[seq]).map((t) => {
+      ${(() => { const sw = showSwings() ? swings(groups[gname]) : {}; return groups[gname].sort((a, b) => a[seq] - b[seq]).map((t) => {
         const ab = nm(t.teamAbbrev);
-        return `<tr class="${ab === hl ? 'hl' : ''}${fav.has(ab) ? ' fav' : ''}" id="st-${ab}"><td>${t[seq]}</td><td class="l"><a class="tlink" href="#/team/${ab}">${logo(ab, 'slogo')} ${esc(nm(t.teamCommonName) || ab)}</a>${t.clinchIndicator ? ` <span class="tag">${esc(t.clinchIndicator)}</span>` : ''}</td><td>${t.gamesPlayed}</td><td>${t.wins}</td><td>${t.losses}</td><td>${t.otLosses}</td><td><b>${t.points}</b></td><td>${t.pointPctg.toFixed(3).replace(/^0/, '')}</td><td>${t.regulationWins}</td><td>${t.goalFor}</td><td>${t.goalAgainst}</td><td>${t.goalDifferential > 0 ? '+' : ''}${t.goalDifferential}</td><td>${t.l10Wins}-${t.l10Losses}-${t.l10OtLosses}</td><td>${esc(t.streakCode || '')}${t.streakCount || ''}</td></tr>`;
-      }).join('')}</tbody></table></div></section>`).join('')}</div>`;
+        const m = sw[ab]; const mv = (n) => (n > 0 ? `<span class="up">+${n}</span>` : n < 0 ? `<span class="down">${n}</span>` : '<span class="muted">0</span>');
+        return `<tr class="${ab === hl ? 'hl' : ''}${fav.has(ab) ? ' fav' : ''}" id="st-${ab}"><td>${t[seq]}</td><td class="l"><a class="tlink" href="#/team/${ab}">${logo(ab, 'slogo')} ${esc(nm(t.teamCommonName) || ab)}</a>${t.clinchIndicator ? ` <span class="tag">${esc(t.clinchIndicator)}</span>` : ''}${m ? ` <span class="swing" data-gloss="Standings moves">(W ${mv(m.win)} / L ${mv(m.loss)})</span>` : ''}</td><td>${t.gamesPlayed}</td><td>${t.wins}</td><td>${t.losses}</td><td>${t.otLosses}</td><td><b>${t.points}</b></td><td>${t.pointPctg.toFixed(3).replace(/^0/, '')}</td><td>${t.regulationWins}</td><td>${t.goalFor}</td><td>${t.goalAgainst}</td><td>${t.goalDifferential > 0 ? '+' : ''}${t.goalDifferential}</td><td>${t.l10Wins}-${t.l10Losses}-${t.l10OtLosses}</td><td>${esc(t.streakCode || '')}${t.streakCount || ''}</td></tr>`;
+      }).join(''); })()}</tbody></table></div></section>`).join('')}</div>`;
 };
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-stand]');
@@ -697,7 +698,8 @@ views.team = (k) => {
   const head = `<section class="card thead" style="--tc:${teamColor(k)}">${logo(k, 'blogo')}
       <div><div class="big2">${esc(TEAMS[k])}</div>${rec || '<div class="muted small">Record loads with the standings.</div>'}</div>
       <button class="btn cmpbtn" type="button" data-cmp="team:${k}" title="Compare with another team">Compare</button>
-      <button class="star big${fav ? ' on' : ''}" type="button" data-star="${k}" title="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${fav ? '★' : '☆'}</button></section>`;
+      <button class="star big${fav ? ' on' : ''}" type="button" data-star="${k}" title="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${fav ? '★' : '☆'}</button></section>
+    ${heroBoxes(k)}`;
 
   // Schedule: regular season and playoffs (preseason only if that is all there is yet).
   const sch = get(sk);
@@ -945,6 +947,15 @@ function teamRecords(upTo) {
     r.gdpg = r.gp ? (r.gf - r.ga) / r.gp : 0;
   }
   for (const r of Object.values(rec)) r.sos = r.opps.length ? r.opps.reduce((a, k) => a + (rec[k]?.pct || 0), 0) / r.opps.length : 0;
+  // SRS-style rating (goals per game above average, adjusted for the opponents played): rating = GD/GP + average
+  // opponent rating, solved by repeating the sum until it settles.
+  for (const r of Object.values(rec)) r.srs = r.gdpg;
+  for (let it = 0; it < 30; it++) {
+    const next = {};
+    for (const [k, r] of Object.entries(rec)) next[k] = r.gdpg + (r.opps.length ? r.opps.reduce((a, o) => a + (rec[o]?.srs || 0), 0) / r.opps.length : 0);
+    const mean = Object.values(next).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(next).length);
+    for (const k of Object.keys(rec)) rec[k].srs = next[k] - mean;
+  }
   return rec;
 }
 const FORMULA = 'Score = 45% points % + 25% goal difference per game (scaled from -2 to +2) + 15% points % in the last 10 games + 15% strength of schedule (average opponent points %), or + 15% expected-goals share (xGF%) when MoneyPuck is on.';
@@ -960,23 +971,113 @@ function powerScores(rec, xg) {
 function lastMonday() { const d = new Date(); d.setHours(12); while (d.getDay() !== 1) d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
 const needSync = (what) => `<section class="card narrow"><h2>${what}</h2><p>This page is built from the saved season, so it needs one season sync first.</p><p><button class="btn primary" type="button" id="btn-sync">Sync the season</button></p></section>`;
 
+
+// Team page "squares": the team's grade (click to reveal) and the strength of its remaining schedule.
+const revealed = new Set();
+const SOS_HOME_EDGE = 0.10, SOS_B2B = 0.15;      // goals per game: road games and the second night of a back-to-back are harder
+function remainingSchedule(k) {
+  const sch = get(`sched:${k}`);
+  if (!sch || !weekList().length) return null;
+  const rec = teamRecords();
+  const games = (sch.games || []).filter((g) => g.gameType >= 2);
+  const left = games.filter((g) => !isFinal(g) && !isLive(g));
+  if (!left.length) return { n: 0 };
+  let tot = 0, b2b = 0, road = 0, prev = null;
+  for (const g of games) {
+    const d = new Date(g.startTimeUTC);
+    const isB2B = prev && d - prev < 36 * 3600 * 1000;
+    prev = d;
+    if (isFinal(g) || isLive(g)) continue;
+    const home = g.homeTeam.abbrev === k, op = home ? g.awayTeam.abbrev : g.homeTeam.abbrev;
+    tot += (rec[op]?.srs || 0) + (home ? 0 : SOS_HOME_EDGE) + (isB2B ? SOS_B2B : 0);
+    if (isB2B) b2b++; if (!home) road++;
+  }
+  return { n: left.length, avg: tot / left.length, b2b, road };
+}
+function heroBoxes(k) {
+  if (!weekList().length) return '';
+  const rc = gradesUnlocked() ? reportCard()[k] : null;
+  const sos = remainingSchedule(k);
+  const shown = revealed.has(k);
+  const grade = rc ? `<button type="button" class="hero grade-box${shown ? ' open' : ''}" data-reveal="${k}" aria-label="Team grade">${shown ? `<b class="grade g${rc.overall[0]}">${rc.overall}</b><small>Offence ${rc.off} &middot; Defence ${rc.def}</small>` : '<b class="q">?</b><small>Click to see the grade</small>'}</button>` : `<div class="hero"><b class="q">?</b><small>Grades open after Week 3</small></div>`;
+  let sbox = '<div class="hero"><b class="q">-</b><small>Schedule loading</small></div>';
+  if (sos && sos.n === 0) sbox = '<div class="hero"><b>Done</b><small>No games left</small></div>';
+  else if (sos) {
+    const tone = sos.avg > 0.15 ? 'hard' : sos.avg < -0.15 ? 'easy' : 'mid';
+    sbox = `<div class="hero sos ${tone}" data-gloss="Remaining SoS"><b>${tone === 'hard' ? 'Hard' : tone === 'easy' ? 'Easy' : 'Average'}</b><small>${sos.n} games left &middot; opponents ${sos.avg > 0 ? '+' : ''}${sos.avg.toFixed(2)} &middot; ${sos.road} road &middot; ${sos.b2b} back-to-backs</small></div>`;
+  }
+  return `<div class="hero-boxes">${grade}${sbox}</div>`;
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-reveal]'); if (b) { revealed.add(b.dataset.reveal); render(); } });
+
+// Standings moves (off by default): for each team playing today, where it would sit with a win or a loss.
+const showSwings = () => { try { return localStorage.getItem('nhldash.showSwings') === '1'; } catch { return false; } };
+dataToggles.push({ id: 'set-swings', label: 'Show standings moves', hint: 'In the standings, the place a team playing today would move to with a win or a loss. Off by default.', get: showSwings, set: (v) => { try { localStorage.setItem('nhldash.showSwings', v ? '1' : '0'); } catch { } } });
+function swings(group) {
+  const playing = new Set();
+  for (const g of get(`score:${today()}`)?.games || []) if (!isFinal(g)) { playing.add(g.awayTeam.abbrev); playing.add(g.homeTeam.abbrev); }
+  if (!playing.size) return {};
+  // NHL order: points, then fewer games played, then regulation wins, then regulation + overtime wins.
+  const order = (list) => list.slice().sort((a, b) => b.pts - a.pts || a.gp - b.gp || b.rw - a.rw || b.row - a.row);
+  const base = group.map((t) => ({ k: nm(t.teamAbbrev), pts: t.points, gp: t.gamesPlayed, rw: t.regulationWins, row: t.regulationPlusOtWins ?? t.wins }));
+  const now = order(base).map((x) => x.k);
+  const out = {};
+  for (const k of now) {
+    if (!playing.has(k)) continue;
+    const place = (fn) => order(base.map((x) => (x.k === k ? fn(x) : x))).findIndex((x) => x.k === k);
+    const cur = now.indexOf(k);
+    out[k] = { win: cur - place((x) => ({ ...x, pts: x.pts + 2, gp: x.gp + 1, rw: x.rw + 1, row: x.row + 1 })), loss: cur - place((x) => ({ ...x, gp: x.gp + 1 })) };
+  }
+  return out;
+}
+
+let rkTab = 'power';
+const gradesEarly = () => { try { return localStorage.getItem('nhldash.gradesEarly') === '1'; } catch { return false; } };
+// Grades unlock once three weeks of the season are finished (fewer games make them noise).
+function gradesUnlocked() { const w = weekList().find((x) => x.n === 3); return gradesEarly() || (!!w && shiftDate(w.monday, 7) <= today()); }
+const LETTERS = [[97, 'A+'], [90, 'A'], [83, 'A-'], [76, 'B+'], [68, 'B'], [60, 'B-'], [52, 'C+'], [44, 'C'], [36, 'C-'], [27, 'D+'], [18, 'D'], [10, 'D-'], [0, 'F']];
+const letter = (pctile) => LETTERS.find(([min]) => pctile >= min)[1];
+// Report card: overall from the SRS-style rating, offence from goals for per game, defence from goals against per game,
+// each as a percentile among the 32 teams turned into a letter.
+function reportCard() {
+  const rec = teamRecords();
+  const ks = Object.keys(rec).filter((k) => rec[k].gp);
+  const pctl = (val, k, lowBetter) => { const vals = ks.map((x) => val(rec[x])); const v = val(rec[k]); const below = vals.filter((x) => (lowBetter ? x > v : x < v)).length; return 100 * below / Math.max(1, vals.length - 1); };
+  const out = {};
+  for (const k of ks) {
+    const r = rec[k];
+    out[k] = { r, overall: letter(pctl((x) => x.srs, k)), off: letter(pctl((x) => x.gf / x.gp, k)), def: letter(pctl((x) => x.ga / x.gp, k, true)), op: pctl((x) => x.srs, k) };
+  }
+  return out;
+}
 views.rankings = () => {
   routeKeys = [];
   if (!weekList().length) return needSync('Power rankings');
+  const tabs = `<div class="segs bar1" role="tablist">${[['power', 'Power rankings'], ['grades', 'Report card']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${rkTab === k}" class="seg${rkTab === k ? ' on' : ''}" data-rktab="${k}">${l}</button>`).join('')}<a class="btn push" href="#/eastwest">Eastern-Western Report</a></div>`;
+  if (rkTab === 'grades') {
+    if (!gradesUnlocked()) return tabs + `<section class="card narrow"><h2>Report card</h2><p>Grades open once Week 3 is over; before that a couple of games swing them too much.</p><label class="row"><span>Show grades anyway</span><input id="set-gradesearly" type="checkbox"></label></section>`;
+    const rc = reportCard();
+    const rows = Object.entries(rc).sort((a, b) => b[1].r.srs - a[1].r.srs);
+    const g = (x) => `<span class="grade g${x[0]}">${x}</span>`;
+    return tabs + `<section class="card wide"><h2>Report card <span class="muted small"><span class="hint" data-gloss="Grade">how grades work</span></span></h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th class="l">Team</th><th>Overall</th><th>Offence</th><th>Defence</th><th>SRS</th><th>GF/GP</th><th>GA/GP</th><th>SOS</th></tr></thead><tbody>
+      ${rows.map(([k, x], i) => `<tr class="${favs().has(k) ? 'fav' : ''}"><td>${i + 1}</td><td class="l"><a class="tlink" href="#/team/${k}">${logo(k, 'slogo')} ${esc(TEAMS[k] || k)}</a></td><td>${g(x.overall)}</td><td>${g(x.off)}</td><td>${g(x.def)}</td><td>${x.r.srs > 0 ? '+' : ''}${x.r.srs.toFixed(2)}</td><td>${(x.r.gf / x.r.gp).toFixed(2)}</td><td>${(x.r.ga / x.r.gp).toFixed(2)}</td><td>${x.r.sos.toFixed(3).replace(/^0/, '')}</td></tr>`).join('')}</tbody></table></div></section>`;
+  }
   let xg = null;
   if (state.settings.moneypuck) { routeKeys = ['mp:teams']; want('mp:teams'); xg = {}; for (const r of get('mp:teams') || []) if (r.situation === 'all') xg[r.team] = r.xGoalsPercentage; if (!Object.keys(xg).length) xg = null; }
   const now = powerScores(teamRecords(), xg);
   const before = powerScores(teamRecords(lastMonday()), null);
   const prevRank = Object.fromEntries(before.map((x, i) => [x.k, i + 1]));
   const fav = favs();
-  return `<div class="segs bar1"><span class="muted small">Built from ${seasonGames().filter((g) => g.gameType === 2 && isFinal(g)).length} saved games. <span class="hint" title="${esc(FORMULA)}">How the score works</span></span><a class="btn push" href="#/eastwest">East-West report</a></div>
-    <section class="card wide"><h2>Power rankings</h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Move</th><th class="l">Team</th><th>Score</th><th>Record</th><th>P%</th><th>GD/GP</th><th>Last 10</th><th>${xg ? 'xGF%' : 'SOS'}</th></tr></thead><tbody>
+  return tabs + `<p class="muted small">Built from ${seasonGames().filter((g) => g.gameType === 2 && isFinal(g)).length} saved games. <span class="hint" data-gloss="Score">How the score works</span></p>
+    <section class="card wide"><h2>Power rankings</h2><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Move</th><th class="l">Team</th><th>Score</th><th>Record</th><th>P%</th><th>GD/GP</th><th>SRS</th><th>Last 10</th><th>${xg ? 'xGF%' : 'SOS'}</th></tr></thead><tbody>
     ${now.map((x, i) => {
       const was = prevRank[x.k], mv = was ? was - (i + 1) : 0;
       const r = x.r;
-      return `<tr class="${fav.has(x.k) ? 'fav' : ''}"><td><b>${i + 1}</b></td><td class="${mv > 0 ? 'up' : mv < 0 ? 'down' : 'muted'}">${mv > 0 ? '&#9650;' + mv : mv < 0 ? '&#9660;' + -mv : '-'}</td><td class="l"><a class="tlink" href="#/team/${x.k}">${logo(x.k, 'slogo')} ${esc(TEAMS[x.k] || x.k)}</a></td><td><b>${x.score.toFixed(1)}</b></td><td>${r.w}-${r.l}-${r.o}</td><td>${r.pct.toFixed(3).replace(/^0/, '')}</td><td>${r.gdpg > 0 ? '+' : ''}${r.gdpg.toFixed(2)}</td><td>${(r.l10 * 100).toFixed(0)}%</td><td>${xg ? ((xg[x.k] ?? 0) * 100).toFixed(1) + '%' : r.sos.toFixed(3).replace(/^0/, '')}</td></tr>`;
-    }).join('')}</tbody></table></div><p class="muted small">Move compares with the rankings before this Monday. ${esc(FORMULA)}</p></section>`;
+      return `<tr class="${fav.has(x.k) ? 'fav' : ''}"><td><b>${i + 1}</b></td><td class="${mv > 0 ? 'up' : mv < 0 ? 'down' : 'muted'}">${mv > 0 ? '&#9650;' + mv : mv < 0 ? '&#9660;' + -mv : '-'}</td><td class="l"><a class="tlink" href="#/team/${x.k}">${logo(x.k, 'slogo')} ${esc(TEAMS[x.k] || x.k)}</a></td><td><b>${x.score.toFixed(1)}</b></td><td>${r.w}-${r.l}-${r.o}</td><td>${r.pct.toFixed(3).replace(/^0/, '')}</td><td>${r.gdpg > 0 ? '+' : ''}${r.gdpg.toFixed(2)}</td><td>${r.srs > 0 ? '+' : ''}${r.srs.toFixed(2)}</td><td>${(r.l10 * 100).toFixed(0)}%</td><td>${xg ? ((xg[x.k] ?? 0) * 100).toFixed(1) + '%' : r.sos.toFixed(3).replace(/^0/, '')}</td></tr>`;
+    }).join('')}</tbody></table></div><p class="muted small">Move compares with the rankings before this Monday.</p></section>`;
 };
+document.addEventListener('click', (e) => { const t = e.target.closest('[data-rktab]'); if (t) { rkTab = t.dataset.rktab; render(); } });
+document.addEventListener('change', (e) => { if (e.target.id === 'set-gradesearly') { try { localStorage.setItem('nhldash.gradesEarly', e.target.checked ? '1' : '0'); } catch { } render(); } });
 
 const ROOKIE_SCORE = 'Rookie score = 10 x (goals + 0.7 x assists + 0.1 x shots on goal + 0.1 x plus/minus) per game, so a point-a-game rookie lands near 10.';
 let rookieSort = 'score';
@@ -999,7 +1100,7 @@ document.addEventListener('click', (e) => { const h = e.target.closest('[data-rk
 views.eastwest = () => {
   routeKeys = ['standings'];
   want('standings');
-  if (!weekList().length) return needSync('East-West report');
+  if (!weekList().length) return needSync('Eastern-Western Report');
   const st = get('standings');
   if (!st) return status('standings') || '<div class="note">Loading...</div>';
   const conf = {}, div = {};
@@ -1020,11 +1121,29 @@ views.eastwest = () => {
   const pct = (r) => { const gp = r.w + r.l + r.o; return gp ? ((2 * r.w + r.o) / (2 * gp)).toFixed(3).replace(/^0/, '') : '-'; };
   const rec = (r) => (r ? `${r.w}-${r.l}-${r.o}` : '-');
   const E = side.Eastern, W = side.Western;
-  const lead = E.w === W.w ? 'Level so far' : E.w > W.w ? 'The East leads' : 'The West leads';
+  const eGames = E.w + E.l + E.o;
+  const margin = E.gf - W.gf;
+  const lead = !eGames ? 'No games between the conferences yet' : E.w === W.w ? 'Level so far' : E.w > W.w ? `The East leads ${E.w}-${W.w}` : `The West leads ${W.w}-${E.w}`;
+  const tr = teamRecords();
+  const avg = (c) => { const ks = Object.keys(tr).filter((k) => conf[k] === c); return ks.length ? ks.reduce((a, k) => a + tr[k].srs, 0) / ks.length : 0; };
+  const top10 = Object.keys(tr).sort((a, b) => tr[b].srs - tr[a].srs).slice(0, 10);
+  const t10 = (c) => top10.filter((k) => conf[k] === c).length;
+  const seeds = (c) => (st.standings || []).filter((t) => t.conferenceName === c).sort((a, b) => a.conferenceSequence - b.conferenceSequence);
+  const es = seeds('Eastern'), ws = seeds('Western');
+  const cell = (t) => { if (!t) return '<span></span>'; const k = nm(t.teamAbbrev); return `<a class="seedc" href="#/team/${k}">${logo(k, 'slogo')}<b>${esc(k)}</b><span class="muted small">${t.wins}-${t.losses}-${t.otLosses}</span><span class="small">${tr[k] ? (tr[k].srs > 0 ? '+' : '') + tr[k].srs.toFixed(2) : ''}</span></a>`; };
   const eastDiv = ['Atlantic', 'Metropolitan'], westDiv = ['Central', 'Pacific'];
   const teams = Object.entries(team).sort((a, b) => pct(b[1]) - pct(a[1]) || b[1].w - a[1].w);
-  return `<section class="card wide"><h2>East-West report <span class="muted small">${games.length} games between the conferences</span></h2>
-      <div class="kpis"><div><b>${rec(E)}</b><small>East vs West</small></div><div><b>${rec(W)}</b><small>West vs East</small></div><div><b>${E.gf}-${W.gf}</b><small>goals East-West</small></div><div><b>${esc(lead)}</b><small>by wins</small></div></div></section>
+  const share = eGames ? (100 * (E.w + E.o / 2) / eGames) : 50;
+  return `<section class="card wide ewr"><h2>Eastern-Western Report <span class="muted small">${games.length} games between the conferences</span></h2>
+      <p class="ewr-headline">${esc(lead)}${eGames ? `, goals ${E.gf}-${W.gf}` : ''}.</p>
+      <div class="ewbar" aria-label="Share of points, East against West"><i class="e" style="width:${share}%"></i><i class="w" style="width:${100 - share}%"></i></div>
+      <div class="ewtiles">
+        <div data-gloss="Head to head"><b>${rec(E)}</b><small>East record vs West &middot; goal margin ${margin > 0 ? '+' : ''}${margin}</small></div>
+        <div data-gloss="Conference rating"><b>${avg('Eastern') > 0 ? '+' : ''}${avg('Eastern').toFixed(2)} / ${avg('Western') > 0 ? '+' : ''}${avg('Western').toFixed(2)}</b><small>average rating, East / West</small></div>
+        <div data-gloss="Top 10"><b>${t10('Eastern')} / ${t10('Western')}</b><small>teams in the top 10 by rating, East / West</small></div>
+      </div></section>
+    <section class="card wide"><h2>Seed by seed <span class="muted small"><span class="hint" data-gloss="Seed by seed">East against West at each standings place</span></span></h2>
+      <div class="seedtbl"><div class="seedh"><span>Eastern</span><span>Seed</span><span>Western</span></div>${Array.from({ length: Math.max(es.length, ws.length) }, (_, i) => { const a2 = es[i], b2 = ws[i]; const ea = a2 && tr[nm(a2.teamAbbrev)]?.srs, wa = b2 && tr[nm(b2.teamAbbrev)]?.srs; return `<div class="seedr${ea != null && wa != null ? (ea > wa ? ' ebetter' : wa > ea ? ' wbetter' : '') : ''}">${cell(a2)}<span class="seedn">${i + 1}</span>${cell(b2)}</div>`; }).join('')}</div></section>
     <div class="grid two"><section class="card"><h2>Division vs division</h2><table class="tbl"><thead><tr><th class="l">East division</th>${westDiv.map((d) => `<th>vs ${d}</th>`).join('')}</tr></thead><tbody>
       ${eastDiv.map((d) => `<tr><td class="l">${d}</td>${westDiv.map((w) => `<td>${rec(dv[d]?.[w])}</td>`).join('')}</tr>`).join('')}</tbody></table>
       <p class="muted small">Records are the East division's, as W-L-OTL.</p></section>
@@ -1262,6 +1381,14 @@ const GLOSS = {
   'GP edge': 'Games played edge: the race is close and the leader got there in fewer games.',
   Qualifying: 'Who qualifies: rate stats (points per game, Game Score per game, Form) need half of the team\'s games; goalie save % and GAA need 30% of the team\'s games (the NHL\'s 25 of 82). Losers only count regulars: 14+ minutes a game and half the team\'s games.',
   'Goals saved above average': 'Goals saved above average: (league save % x shots faced) - goals allowed, from the saved box scores. Positive is better than an average goalie.',
+  SRS: 'Rating (SRS-style): goals per game above an average team, adjusted for the strength of the opponents played. Solved by repeating rating = goal difference per game + average opponent rating until it settles. 0 is average.',
+  Grade: 'Report card: each team\'s rating (overall), goals for per game (offence) and goals against per game (defence) as a percentile among the 32 teams, turned into a letter (97+ A+, 90 A, 83 A-, 76 B+ ... under 10 F). Hidden until Week 3 is over.',
+  'Remaining SoS': 'Remaining strength of schedule: the average rating of the opponents still to play, plus 0.10 for each road game and 0.15 for the second night of a back-to-back. Above +0.15 is hard (red), below -0.15 easy (green).',
+  'Standings moves': 'Where the team would sit in this table with a win (2 points) or a regulation loss, if every other team stood still. NHL order: points, fewer games played, regulation wins, regulation plus overtime wins.',
+  'Head to head': 'Head to head: the East\'s record (W-L-OTL) in games against the West, and the goal margin across them.',
+  'Conference rating': 'The average SRS-style rating of each conference\'s teams.',
+  'Top 10': 'How many of the league\'s 10 best teams by rating play in each conference.',
+  'Seed by seed': 'East and West teams at the same place in their conference standings, side by side; the better-rated one is highlighted.',
   'P%': 'Points percentage: points earned / points possible (2 per game).',
   RW: 'Regulation wins: the first tiebreaker in the standings.',
   'GD/GP': 'Goal difference per game played.',

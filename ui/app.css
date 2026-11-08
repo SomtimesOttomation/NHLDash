@@ -435,3 +435,34 @@ input[type=time] { font: inherit; color: var(--text); background: var(--surface)
 .pogr { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .pogv { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .powgrid { padding: 0 !important; }
+
+/* Report card, team squares, standings moves, conference report */
+.grade { display: inline-block; min-width: 34px; padding: 2px 6px; border-radius: 6px; font-weight: 800; text-align: center; }
+.grade.gA { background: color-mix(in srgb, #1f9d55 18%, transparent); color: #1f9d55; }
+.grade.gB { background: color-mix(in srgb, #2f80ed 16%, transparent); color: #2f80ed; }
+.grade.gC { background: color-mix(in srgb, #b7892b 18%, transparent); color: #b7892b; }
+.grade.gD, .grade.gF { background: color-mix(in srgb, #cc3b3b 16%, transparent); color: #cc3b3b; }
+.hero-boxes { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; margin: 14px 0; }
+.hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; text-align: center; min-height: 104px; }
+button.hero { cursor: pointer; }
+.hero b { font-size: 30px; }
+.hero b.q { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 10px; background: #000; color: #fff; font-size: 26px; }
+.hero small { color: var(--muted); font-size: 12px; }
+.hero.sos.hard { border-color: #cc3b3b; } .hero.sos.hard b { color: #cc3b3b; }
+.hero.sos.mid { border-color: #b7892b; } .hero.sos.mid b { color: #b7892b; }
+.hero.sos.easy { border-color: #1f9d55; } .hero.sos.easy b { color: #1f9d55; }
+.swing { font-size: 11px; color: var(--muted); white-space: nowrap; }
+span.up { color: #16a34a; font-weight: 700; } span.down { color: var(--live); font-weight: 700; }
+.ewr-headline { margin: 0 0 10px; font-size: 18px; font-weight: 700; }
+.ewbar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--surface2); }
+.ewbar i { display: block; height: 100%; } .ewbar .e { background: #1d5fbf; } .ewbar .w { background: #b8282e; }
+.ewtiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 14px; }
+.ewtiles div { background: var(--surface2); border-radius: 10px; padding: 12px; }
+.ewtiles b { display: block; font-size: 20px; } .ewtiles small { color: var(--muted); font-size: 12px; }
+.seedtbl { display: flex; flex-direction: column; gap: 4px; }
+.seedh, .seedr { display: grid; grid-template-columns: 1fr 96px 1fr; align-items: center; gap: 8px; }
+.seedh { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; } .seedh span:nth-child(2) { text-align: center; }
+.seedn { text-align: center; font-weight: 700; color: var(--muted); }
+.seedc { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text); text-decoration: none; border: 1px solid transparent; }
+.seedc:hover { background: var(--surface2); }
+.seedr.ebetter .seedc:first-child { border-color: #1d5fbf; } .seedr.wbetter .seedc:last-child { border-color: #b8282e; }
