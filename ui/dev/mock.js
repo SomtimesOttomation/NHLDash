@@ -25,6 +25,11 @@
       case 'traffic.resume': state.halted = false; send({ event: 'traffic', data: { stopped: false } }); return ok(state);
       case 'season.weeks': return ok([]);
       case 'sync.status': return ok({ running: false, savedGames: 0, done: 0, total: 0, note: '' });
+      case 'sync.run': {
+        ok({ started: true }); let done = 0; const total = 40;
+        const t = setInterval(() => { done += 4; const fin = done >= total; send({ event: 'sync', data: fin ? { running: false, pct: 100, cancelled: false, note: '' } : { running: true, pct: Math.round(100 * done / total), done, total } }); if (fin) clearInterval(t); }, 600);
+        return undefined;
+      }
       case 'schedule.get': return ok({ exists: false, time: '', lastRun: '' });
       case 'traffic.get': return ok({ uptimeSec: 0, requests: 0, bytes: 0, errors: 0, byHost: {}, last: [] });
       case 'data.get': {

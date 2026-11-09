@@ -505,9 +505,13 @@ th.hint, th[data-gloss] { text-decoration-color: var(--muted); }
 .np-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px 0 4px; }
 .navpill .psearch, .navpill .psearch input { margin: 0; background: transparent; }
 .navpill .psearch input { width: min(483px, 46vw); border: 0; border-radius: 4px; padding: 8px 14px; }
-.navpill .psearch input:focus { outline: none; background: var(--surface2); }
-.navpill .psearch-ghost { padding: 0 15px; }
+.navpill .psearch input:focus { outline: none; background: transparent; }
+.navpill .psearch { border-radius: 4px; }
+.navpill .psearch:focus-within { background: var(--surface2); }
+.navpill .psearch-ghost { padding: 9px 14px; align-items: flex-start; line-height: normal; font-size: 14px; }
 .navpill .psearch-results { left: 50%; transform: translateX(-50%); }
 [hidden] { display: none !important; }
 /* halt bar: NBADash v0.21.0 values (pause switch, docs/NAVBAR-SPEC.md) */
 .halted.haltbar { justify-content: center; gap: 12px; margin: 0; padding: 8px 16px; font-size: 13px; border-radius: 0; border: 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--live) 14%, var(--surface)); }
+/* sync bar: NBADash v0.21.0 values (docs/NAVBAR-SPEC.md) */
+.syncbar { position: relative; display: flex; align-items: center; height: 26px; padding: 4px 20px; box-sizing: border-box; font-size: 12px; color: var(--text); background: linear-gradient(to right, color-mix(in srgb, var(--accent2) 28%, var(--surface2)) var(--sync-pct, 0%), var(--surface2) var(--sync-pct, 0%)); transition: background .25s; }

@@ -872,6 +872,16 @@ function renderWeekBar(activeN) {
     ${weeks.map((w) => `<a class="weeklink${w.n === activeN ? ' active' : ''}" href="#/week/${w.n}" title="${esc(weekRange(w.monday))}">Week ${w.n}</a>`).join('')}
     ${!weeks.length && season.loaded ? '<span class="muted small">Sync once to unlock week pages, power rankings, players of the week, Leaders and Losers and the Eastern-Western Report.</span>' : ''}`;
 }
+// sync progress bar under the halt bar (docs/NAVBAR-SPEC.md #syncbar, NBADash values)
+function renderSyncBar() {
+  const el = $('syncbar'), s = season.sync;
+  el.hidden = !s?.running;
+  if (!s?.running) { el.innerHTML = ''; return; }
+  const pct = Math.max(0, Math.min(100, s.pct || 0));
+  el.style.setProperty('--sync-pct', pct + '%');
+  el.innerHTML = `<span>Syncing the season · ${pct}%${s.done != null && s.total ? ` · ${s.done} of ${s.total}` : ''}${s.note ? ` · ${esc(s.note)}` : ''}</span>`;
+  el.setAttribute('role', 'progressbar'); el.setAttribute('aria-valuenow', String(pct)); el.setAttribute('aria-valuemin', '0'); el.setAttribute('aria-valuemax', '100'); el.setAttribute('aria-label', 'Season sync');
+}
 function weekRange(monday) {
   const a = new Date(monday + 'T12:00:00'), b = new Date(a); b.setDate(b.getDate() + 6);
   const f = (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -1637,6 +1647,7 @@ function render() {
   const inLauncher = state.mode === 'launcher';
   $('btn-theme').hidden = inLauncher;
   $('haltbar').hidden = !state.halted;
+  renderSyncBar();
   versionChip();
   $('btn-home').classList.toggle('active', !!r.home);
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === r.tab));
