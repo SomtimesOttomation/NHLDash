@@ -491,3 +491,21 @@ span.up { color: #16a34a; font-weight: 700; } span.down { color: var(--live); fo
 .tipcard pre { margin: 8px 0 0; padding: 8px 10px; background: var(--surface2); border-radius: 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
 .hint, [data-gloss] { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 th.hint, th[data-gloss] { text-decoration-color: var(--muted); }
+
+/* ---------------------------------------------------------------- navigation bar docking (docs/NAVBAR-SPEC.md, NBADash v0.21.0 final values) */
+/* The bar sits directly under the week bar (or the banner when there is none), flush, no gap. */
+.weekbar { margin: 0; }
+.banner { margin-bottom: 0; }
+.navpill-row { display: flex; justify-content: center; padding: 0 16px 10px; background: var(--bg); }
+.navpill { display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 0; background: var(--surface); border: 1px solid var(--line); margin-top: 0; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.np-btn { width: 34px; height: 34px; border-radius: 4px; background: transparent; color: var(--text); }
+.np-btn:hover { background: var(--surface2); }
+.np-btn.active { color: var(--accent); }
+.np-btn svg { display: block; width: 22px; height: 22px; }
+.np-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px 0 4px; }
+.navpill .psearch, .navpill .psearch input { margin: 0; background: transparent; }
+.navpill .psearch input { width: min(483px, 46vw); border: 0; border-radius: 4px; padding: 8px 14px; }
+.navpill .psearch input:focus { outline: none; background: var(--surface2); }
+.navpill .psearch-ghost { padding: 0 15px; }
+.navpill .psearch-results { left: 50%; transform: translateX(-50%); }
+[hidden] { display: none !important; }

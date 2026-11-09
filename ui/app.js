@@ -1636,7 +1636,7 @@ function render() {
   const r = parseRoute();
   const inLauncher = state.mode === 'launcher';
   $('btn-theme').hidden = inLauncher;
-  $('halted').hidden = !state.halted;
+  $('haltbar').hidden = !state.halted;
   versionChip();
   $('btn-home').classList.toggle('active', !!r.home);
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === r.tab));
