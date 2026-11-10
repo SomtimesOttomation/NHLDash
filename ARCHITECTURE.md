@@ -46,3 +46,7 @@ Refresh. Bulk downloads (season box scores, draft info) go one request every 0.6
 version), Form (Kalman filter), leaders and losers with qualifying minimums. `teamRecords()` builds team records,
 strength of schedule and the SRS-style rating from the saved weeks. Every calculated number has a hover card
 (`GLOSS`, `GLOSS_F`).
+
+## Commits
+
+Same setup as NBADash: commits are authored as `Claude <noreply@anthropic.com>` and signed with the Claude session's signing key, so GitHub shows them as Verified. Earlier commits (up to 0.5.0 and the navigation bar work) use the SomtimesOttomation noreply address and stay as they are; history is never rewritten.
