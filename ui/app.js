@@ -872,15 +872,21 @@ function renderWeekBar(activeN) {
     ${weeks.map((w) => `<a class="weeklink${w.n === activeN ? ' active' : ''}" href="#/week/${w.n}" title="${esc(weekRange(w.monday))}">Week ${w.n}</a>`).join('')}
     ${!weeks.length && season.loaded ? '<span class="muted small">Sync once to unlock week pages, power rankings, players of the week, Leaders and Losers and the Eastern-Western Report.</span>' : ''}`;
 }
-// sync progress bar under the halt bar (docs/NAVBAR-SPEC.md #syncbar, NBADash values)
+// sync progress bar under the halt bar (docs/NAVBAR-SPEC.md #syncbar, NBADash values):
+// fill = progress, sliding fill while the total is not known yet, red when the sync failed
 function renderSyncBar() {
   const el = $('syncbar'), s = season.sync;
-  el.hidden = !s?.running;
-  if (!s?.running) { el.innerHTML = ''; return; }
-  const pct = Math.max(0, Math.min(100, s.pct || 0));
-  el.style.setProperty('--sync-pct', pct + '%');
-  el.innerHTML = `<span>Syncing the season · ${pct}%${s.done != null && s.total ? ` · ${s.done} of ${s.total}` : ''}${s.note ? ` · ${esc(s.note)}` : ''}</span>`;
-  el.setAttribute('role', 'progressbar'); el.setAttribute('aria-valuenow', String(pct)); el.setAttribute('aria-valuemin', '0'); el.setAttribute('aria-valuemax', '100'); el.setAttribute('aria-label', 'Season sync');
+  const show = !!(s && (s.running || s.failed));
+  el.hidden = !show;
+  if (!show) { el.innerHTML = ''; el.className = 'syncbar'; return; }
+  const known = !s.failed && s.total > 0;
+  const pct = s.failed ? 100 : Math.max(0, Math.min(100, s.pct || 0));
+  el.className = 'syncbar' + (s.failed ? ' failed' : known ? '' : ' unknown');
+  const text = s.failed ? `Season sync failed${s.note ? ` · ${esc(s.note)}` : ''}`
+    : `Syncing the season${known ? ` · ${pct}% · ${s.done} of ${s.total}` : ' · starting...'}${s.note ? ` · ${esc(s.note)}` : ''}`;
+  el.innerHTML = `<i class="sync-fill"${known || s.failed ? ` style="width:${pct}%"` : ''}></i><span class="sync-text">${text}</span>`;
+  el.setAttribute('role', 'progressbar'); el.setAttribute('aria-label', 'Season sync'); el.setAttribute('aria-valuemin', '0'); el.setAttribute('aria-valuemax', '100');
+  if (known) el.setAttribute('aria-valuenow', String(pct)); else el.removeAttribute('aria-valuenow');
 }
 function weekRange(monday) {
   const a = new Date(monday + 'T12:00:00'), b = new Date(a); b.setDate(b.getDate() + 6);
@@ -896,7 +902,7 @@ async function runSync() {
     try { localStorage.setItem('syncAck', '1'); } catch { }
   }
   try { const r = await bridge.request('sync.run', { boxes: syncBoxes() }); if (r && r.started) { season.sync = { running: true, pct: 0 }; render(); } }
-  catch (e) { alertNote(e.message); }
+  catch (e) { alertNote(e.message); season.sync = { running: false, failed: true, note: e.message }; render(); setTimeout(() => { if (season.sync?.failed) { season.sync = null; render(); } }, 8000); }
 }
 const syncAck = () => { try { return localStorage.getItem('syncAck') === '1'; } catch { return false; } };
 document.addEventListener('click', (e) => { if (e.target.id === 'btn-sync') runSync(); });
