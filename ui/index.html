@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <header class="top">
+  <header id="topbar" class="top">
     <img class="logo" src="img/tab-icon.svg" alt="">
     <h1>NHL 2026-27</h1>
     <nav class="tabs" aria-label="Sections">
@@ -24,6 +24,11 @@
     <button id="btn-version" class="ver-btn" type="button" hidden title="Check for updates"></button>
     <button id="btn-theme" class="icon-btn" type="button" hidden>Theme</button>
   </header>
+  <div id="haltbar" class="halted haltbar" hidden role="status">
+    <span><strong>Data refresh stopped.</strong> NHLDash will not fetch data until you resume.</span>
+    <button id="btn-resume" class="btn primary" type="button">Resume</button>
+  </div>
+  <div id="syncbar" class="syncbar" hidden></div>
   <nav id="banner" class="banner" aria-label="Teams"></nav>
   <nav id="weekbar" class="weekbar" aria-label="Season weeks"></nav>
 
@@ -44,11 +49,6 @@
       <button id="live-status" class="live-status np-live" type="button" aria-pressed="false"></button>
       <button id="btn-settings" class="np-btn" type="button" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM19.4 13.5l1.6 1.2-1.8 3.1-1.9-.7a7.6 7.6 0 0 1-1.7 1l-.3 2h-3.6l-.3-2a7.6 7.6 0 0 1-1.7-1l-1.9.7-1.8-3.1 1.6-1.2a7.7 7.7 0 0 1 0-2l-1.6-1.2 1.8-3.1 1.9.7a7.6 7.6 0 0 1 1.7-1l.3-2h3.6l.3 2a7.6 7.6 0 0 1 1.7 1l1.9-.7 1.8 3.1-1.6 1.2a7.7 7.7 0 0 1 0 2z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
-  </div>
-
-  <div id="halted" class="halted" hidden role="status">
-    <span><strong>Data traffic stopped.</strong> Nothing is downloaded until you resume. Saved data still shows.</span>
-    <button id="btn-resume" class="btn primary" type="button">Resume</button>
   </div>
 
   <main id="view"></main>
