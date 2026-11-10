@@ -6,6 +6,8 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.5.1 (2026-11-09)
+
 **Bug/Fix**
 - The grey search completion shows again while you type (the search box's focus background hid it) and lines up exactly with the typed letters.
 
@@ -16,6 +18,7 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 **Housekeeping**
 - docs/NAVBAR-SPEC.md updated to NBADash's current spec.
+- New commits are signed by Claude, as in NBADash.
 
 ## 0.5.0 (2026-11-08)
 
