@@ -6,6 +6,17 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+**Bug/Fix**
+- The grey search completion shows again while you type (the search box's focus background hid it) and lines up exactly with the typed letters.
+
+**Redesign**
+- Navigation bar docked flush under the week bar, as in NBADash; no gap when the week bar is hidden.
+- "Data refresh stopped" bar is a full-width row under the top bar, NBADash style.
+- Season sync progress shows in a bar under the top bar (fills as it goes, red if it fails).
+
+**Housekeeping**
+- docs/NAVBAR-SPEC.md updated to NBADash's current spec.
+
 ## 0.5.0 (2026-11-08)
 
 **Feature**
