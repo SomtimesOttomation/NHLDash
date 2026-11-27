@@ -79,6 +79,18 @@ Shows progress of a manual sync, if the dash has one. NBADash values, for dashes
   - `.on` (an event is live): bold, colour `var(--live)`, with a 10px dot before the text that blinks hard: 0.9s ease-in-out loop between full opacity, scale 1.1 and an 8px `var(--live)` glow, and 15% opacity at scale 0.7. With reduced motion, the loop slows to 2.4s.
   - `.halted` (paused): bold, colour `var(--warn)`, text `Paused`, with a small pause mark (two 3px bars) before the text. No blinking.
 
+## Glass (DashLauncher 0.14.0+)
+
+DashLauncher's opt-in Glass setting (Windows 11 Acrylic) sends `host.theme` as `{ theme, glass }`. With `glass: true` the launcher makes the dash's view transparent and the blurred, theme-tinted desktop shows behind the page.
+
+- On `host.theme`, set `<html data-glass="1">` when `glass` is `true`; remove it when `false`. Standalone (no host), never set it.
+- Under `:root[data-glass]`: `--bg: transparent` (and a transparent `html`/`body`); surfaces translucent: light `--surface: rgba(255,255,255,.62)`, dark `rgba(30,36,52,.62)`; `--surface2` light `rgba(255,255,255,.42)`, dark `rgba(255,255,255,.08)`; `--line` about 12% ink (light `rgba(19,23,34,.12)`, dark `rgba(232,236,244,.12)`). Dark follows the same rules as the normal theme (`data-theme="dark"`, or system dark unless `data-theme="light"`).
+- Text, scores, team colours, logos and the live/accent colours stay solid. Only backgrounds go translucent.
+- Nav bar (`.navpill`): strongest frost, so it stays readable over a busy wallpaper. Background light `rgba(255,255,255,.80)`, dark `rgba(26,31,45,.80)`, `backdrop-filter: blur(36px) saturate(1.5)`. Square corners, border and sizes don't change. The search focus background (`.psearch:focus-within`) uses `--surface2` as usual.
+- Same strong frost on anything holding a table (`.card:has(.tbl)` in NHLDash). Pop-ups over content (search results, dialogs, hover cards) are nearly opaque: light `rgba(255,255,255,.92)`, dark `rgba(22,27,37,.94)`.
+- Cards, banner tiles, the banner, the top bar, the week bar, `#haltbar` and `#syncbar`: the translucent `--surface` with `backdrop-filter: blur(24px) saturate(1.4)`.
+- Check it over a busy wallpaper in both themes: every line of text must stay readable. The browser preview can fake the desktop (NHLDash: `?glass=1&theme=dark|light`, with a tinted, blurred wallpaper like Acrylic).
+
 ## Behaviour
 
 - **Back**: steps back through the dash's own `#/` route history. If there is nothing to go back to, goes Home. Also Alt+Left and mouse button 3 (back).
@@ -96,3 +108,4 @@ Shows progress of a manual sync, if the dash has one. NBADash values, for dashes
 - v0.13.1: refresh, live status and Settings moved from the top bar into the bar.
 - v0.15.0: live status is a button that pauses and resumes all data traffic; stronger blink while live; `Paused` state.
 - v0.21.0 (spec only, from NHLDash's docking): added page order and docking rules (no margin above the bar, hidden bars take no space); `#haltbar` and `#syncbar` styles; ghost completion padding `9px 14px` (NBADash had `9px 15px`, 1px off); ghost uses the input's font; the focus background goes on the wrapper, because an input background hid the suggestion (a bug in NBADash from v0.13.0 to v0.21.1).
+- Glass (for DashLauncher 0.14.0, drafted by NHLDash): `data-glass` on `host.theme`; translucent surfaces; strongest frost on the nav bar and tables.
