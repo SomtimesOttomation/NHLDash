@@ -1841,7 +1841,12 @@ $('btn-theme').addEventListener('click', () => {
 });
 
 bridge.on('traffic', (d) => { if (!state) return; state.halted = !!d.stopped; if (d.stopped) store.forEach((v) => { v.loading = false; }); render(); });
-bridge.on('host.theme', (d) => { bridge.setTheme(d.theme); render(); });
+bridge.on('host.theme', (d) => {
+  bridge.setTheme(d.theme);
+  // Glass (DashLauncher 0.14.0+): the launcher shows the blurred desktop behind a transparent page
+  if (d.glass === true) document.documentElement.dataset.glass = '1'; else delete document.documentElement.dataset.glass;
+  render();
+});
 bridge.on('host.visible', () => {
   // Refetch only if automatic refresh is on; otherwise the live status shows how old the data is.
   if (state?.settings.autoRefresh && !state.halted) routeKeys.forEach((k) => want(k, true));

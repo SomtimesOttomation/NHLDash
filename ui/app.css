@@ -520,3 +520,38 @@ th.hint, th[data-gloss] { text-decoration-color: var(--muted); }
 .syncbar.unknown .sync-fill { width: 30%; animation: sync-slide 1.4s ease-in-out infinite; }
 @keyframes sync-slide { from { left: -30%; } to { left: 100%; } }
 .syncbar .sync-text { position: relative; display: block; padding: 4px 20px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Glass (DashLauncher 0.14.0+, opt-in; docs/NAVBAR-SPEC.md "Glass") ----------
+   host.theme { theme, glass:true } sets <html data-glass="1">. The launcher makes the view transparent and
+   Windows 11 Acrylic shows the blurred desktop behind the page. Never set when standalone. Text, scores and
+   team colours stay solid; only backgrounds go translucent. Tables, the nav bar and pop-ups get the strongest frost. */
+:root[data-glass] {
+  --bg: transparent;
+  --surface: rgba(255,255,255,.62); --surface2: rgba(255,255,255,.42); --line: rgba(19,23,34,.12);
+  --frost: rgba(255,255,255,.80); --pop: rgba(255,255,255,.92);
+  --blur: blur(24px) saturate(1.4); --blur-strong: blur(36px) saturate(1.5);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-glass]:not([data-theme="light"]) {
+    --surface: rgba(30,36,52,.62); --surface2: rgba(255,255,255,.08); --line: rgba(232,236,244,.12);
+    --frost: rgba(26,31,45,.80); --pop: rgba(22,27,37,.94);
+  }
+}
+:root[data-glass][data-theme="dark"] {
+  --surface: rgba(30,36,52,.62); --surface2: rgba(255,255,255,.08); --line: rgba(232,236,244,.12);
+  --frost: rgba(26,31,45,.80); --pop: rgba(22,27,37,.94);
+}
+:root[data-glass], :root[data-glass] body { background: transparent; }
+:root[data-glass] .card, :root[data-glass] .tile, :root[data-glass] .banner, :root[data-glass] .top,
+:root[data-glass] .weekbar, :root[data-glass] .haltbar, :root[data-glass] .syncbar, :root[data-glass] .banner-btn {
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+/* strongest frost: the nav bar, anything holding a table, and pop-ups that sit over busy content */
+:root[data-glass] .navpill, :root[data-glass] .card:has(.tbl) {
+  background: var(--frost); backdrop-filter: var(--blur-strong); -webkit-backdrop-filter: var(--blur-strong);
+}
+:root[data-glass] .psearch-results, :root[data-glass] .dialog-box, :root[data-glass] .tipcard, :root[data-glass] .cmpbar {
+  background: var(--pop); backdrop-filter: var(--blur-strong); -webkit-backdrop-filter: var(--blur-strong);
+}
+:root[data-glass] .tile:not(.fav) { background: var(--surface2); }
+:root[data-glass] .tile:hover { background: var(--surface2); }

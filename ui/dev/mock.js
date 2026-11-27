@@ -44,4 +44,15 @@
   };
   window.chrome = window.chrome || {};
   window.chrome.webview = { addEventListener: (t, f) => listeners.push(f), postMessage: handle };
+  // ?glass=1&theme=dark|light previews DashLauncher's Glass setting over a made-up wallpaper
+  const q = new URLSearchParams(location.search);
+  if (q.has('glass')) {
+    setTimeout(() => send({ event: 'host.theme', data: { theme: q.get('theme') || 'system', glass: true } }), 400);
+    addEventListener('DOMContentLoaded', () => { const w = document.createElement('div'); w.setAttribute('aria-hidden', 'true');
+      w.style.cssText = 'position:fixed;inset:0;z-index:-1;background:radial-gradient(60% 70% at 15% 20%,#2f7cff,transparent 60%),radial-gradient(50% 60% at 85% 30%,#ff5a8a,transparent 60%),radial-gradient(60% 60% at 60% 95%,#18c29c,transparent 60%),#1a1f3a';
+      const tint = document.createElement('div'); tint.setAttribute('aria-hidden', 'true'); // Acrylic tints and blurs the desktop to the theme
+      const dark = q.get('theme') === 'dark' || (q.get('theme') !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      tint.style.cssText = 'position:fixed;inset:0;z-index:-1;backdrop-filter:blur(30px) saturate(1.4);background:' + (dark ? 'rgba(16,20,30,.62)' : 'rgba(243,245,250,.62)');
+      document.body.prepend(tint); document.body.prepend(w); });
+  }
 })();
