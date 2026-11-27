@@ -6,6 +6,14 @@ Release rhythm: changes are merged as they are done without changing VERSION, an
 
 ## Unreleased
 
+## 0.6.0 (2026-11-27)
+
+**Feature**
+- Glass look: with DashLauncher's Glass setting on (0.14.0+), the page goes see-through and cards, tiles and the navigation bar are frosted over the desktop. Text, scores and team colours stay solid.
+
+**Housekeeping**
+- Navigation bar spec gains a Glass section; the browser preview can show the glass look.
+
 ## 0.5.1 (2026-11-09)
 
 **Bug/Fix**
